@@ -4,17 +4,17 @@ from sage.all import *
 import sage
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
 from sage.calculus.var import var
-from kernels import *
 import time
 import torch
 import matplotlib.pyplot as plt
-from  lodegp import LODEGP 
 from abc import ABC, abstractmethod
+import numpy as np
 
-torch.set_default_tensor_type(torch.DoubleTensor)
+#torch.set_default_tensor_type(torch.DoubleTensor)
+torch.set_default_dtype(torch.float64)
 
 
-class ODE_System(ABC):
+class ODE_System():
     def __init__(self, dimension):
         self.dimension = dimension
 
@@ -23,17 +23,22 @@ class ODE_System(ABC):
     # def dimension(self):
     #     pass
 
-    @abstractmethod
+    #@abstractmethod
     def get_ODEsolution(self, t_vec):
-        pass
+        raise NotImplementedError("ODE solution for this system is not implemented yet.")
 
-    @abstractmethod
+    #@abstractmethod
     def get_ODEmatrix(self):
-        pass
+        raise NotImplementedError("ODE matrix for this system is not implemented yet.")
 
-    @abstractmethod
+    #@abstractmethod
     def get_ODEfrom_spline(self, fkt):
-        pass
+        raise NotImplementedError("ODE from spline for this system is not implemented yet.")
+    
+    #@abstractmethod
+    def stateTransition(self, t, x):
+        raise NotImplementedError("state transition for this system is not implemented yet.")
+    
 
 R = QQ['x']; (x,) = R._first_ngens(1)
 

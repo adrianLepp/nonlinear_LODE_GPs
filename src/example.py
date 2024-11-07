@@ -7,33 +7,99 @@ from kernels import *
 import time
 import torch
 import matplotlib.pyplot as plt
+import argparse
+import numpy as np
+from scipy.integrate import solve_ivp
+# ----------------------------------------------------------------------------
 from  lodegp import LODEGP 
 from systems import Bipendulum, ThreeTank, System1
+from helpers import saveDataToCsv, collectMetaInformation, saveSettingsToJson
+
+DATA_ID = 0 # TODO load DATA_ID from file
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="example simulationfor lodegp"
+    )
+    parser.add_argument("--system", required=True, type=str, help="system to simulate")
+    parser.add_argument("--save", required=True, type=bool, help="save data", default=False)
+    parser.add_argument("--model", required=True, type=str, default="None", help="load or save model")
+    #parser.add_argument("--num3", required=True, type=int)
+
+    args = parser.parse_args()
+    system_name = args.system
+    SAVE_DATA = args.save
+    if args.model == 'load':
+        LOAD_MODEL = True
+        SAVE_MODEL = False
+    elif args.model == 'save':
+        LOAD_MODEL = False
+        SAVE_MODEL = True
+    else:
+        LOAD_MODEL = False
+        SAVE_MODEL = False
+
+    print(f"simulate {system_name}")
+    # if LOAD_MODEL:
+    #     print("load model with model id {MODEL_ID}")
+    # if SAVE_MODEL:
+    #     print(f"save model with model id {MODEL_ID}")
+    if SAVE_DATA is True:
+        print(f"save data with data id {DATA_ID}")
 
 # %% config
 
-torch.set_default_tensor_type(torch.DoubleTensor)
+#torch.set_default_tensor_type(torch.DoubleTensor)
+torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE_MODEL = False
-LOAD_MODEL = True
-
-if LOAD_MODEL:
-    SAVE_MODEL = False
+model_name = "lodegp"
+#system_name = "bipendulum"
+name = str(DATA_ID) + '_' + model_name + "_" + system_name
 
 model_dir = "data/"
-model_path = model_dir + "lodegp_bipendulum.pth"
+model_path = model_dir + name + ".pth"
 
-
-
+data_dir = "../data/"
 
 # %% setup
 
-num_data = 50 
-train_x = torch.linspace(0, 15, num_data)
+num_data = 50
+tStart = 0
+tEnd = 1 
+train_x = torch.linspace(tStart, tEnd, num_data)
 
-system = Bipendulum()
-solution = system.get_ODEsolution(train_x)
+
+match system_name:
+    case "bipendulum":
+        system = Bipendulum()
+    case "threetank":
+        system = ThreeTank()
+    case "system1":
+        system = System1()
+    case "inverted_pendulum":
+        system = Inverted_Pendulum()
+    case _:
+        raise ValueError(f"System {system_name} not found")
+
+try:
+    solution = system.get_ODEsolution(train_x)
+except NotImplementedError:
+    print("No analytical solution available. Use state transition function instead.")
+
+    ts = np.linspace(tStart, tEnd, num_data)
+
+    x0 = np.zeros(5)
+    angle= 1
+    x0[2] = angle/180*np.pi
+
+    sol = solve_ivp(system.stateTransition, [tStart, tEnd], x0, method='RK45', t_eval=ts,)#, max_step=dt ,  atol = 1, rtol = 1
+    x = sol.y.transpose()
+
+    solution = (torch.tensor(x[:,0]), torch.tensor(x[:,2]), torch.tensor(x[:,4]))
+except:
+    print("Error in system")
+
 num_tasks = system.dimension
 system_matrix = system.get_ODEmatrix()
 
@@ -56,8 +122,8 @@ else:
 start = time.time()        
 end = time.time()
 
-test_start = 1
-test_end = 5 
+test_start = 0
+test_end = 1 
 test_count = 1000
 eval_step_size = 1e-4
 second_derivative=True 
@@ -98,6 +164,7 @@ print('ODE error', np.mean(ode_error_list))
 train_x_np = train_x.numpy()
 train_y_np = train_y.numpy()
 test_x_np = test_x.numpy()
+estimation = output.mean.numpy()
 
 
 plt.figure()
@@ -106,12 +173,23 @@ plt.plot(train_x_np, train_y_np[:, 1], label="f2")
 plt.plot(train_x_np, train_y_np[:, 2], label="x''")
 plt.legend()
 
-plt.plot(test_x_np, output.mean[:, 0].numpy(), label="f1_est")
-plt.plot(test_x_np, output.mean[:, 1].numpy(), label="f2_est")
-plt.plot(test_x_np, output.mean[:, 2].numpy(), label="x'' _est")
+plt.plot(test_x_np, estimation[:, 0], label="f1_est")
+plt.plot(test_x_np, estimation[:, 1], label="f2_est")
+plt.plot(test_x_np, estimation[:, 2], label="x'' _est")
 plt.legend()
 plt.show()
 
 
 if SAVE_MODEL:
     torch.save(model.state_dict(), model_path)
+
+if SAVE_DATA:
+    data = {'time': test_x_np}
+    for i in range(len(estimation[1])):
+        data[f'f{i+1}'] = estimation[:, i]
+    saveDataToCsv(data_dir, name, data, overwrite=True)
+
+    info = collectMetaInformation(DATA_ID, model_name, system_name, model.named_parameters(), np.mean(ode_error_list))
+    saveSettingsToJson(data_dir, name, info, overwrite=True)
+    DATA_ID += 1
+

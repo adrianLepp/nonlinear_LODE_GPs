@@ -4,7 +4,7 @@ from sage.all import *
 import sage
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
 from sage.calculus.var import var
-from kernels import *
+from src.kernels import *
 import pprint
 import time
 import torch
@@ -355,3 +355,6 @@ sample_result["dgl1_difference"] = dgl1_difference
 sample_result["dgl2_difference"] = dgl2_difference
 print(sample_result["avg_dgl_error"])
 print([np.mean(dgl1_difference), np.mean(dgl2_difference)])
+
+
+

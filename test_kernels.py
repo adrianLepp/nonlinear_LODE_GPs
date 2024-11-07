@@ -1,6 +1,6 @@
 import pytest
 import gpytorch
-from kernels import *
+from src.kernels import *
 from sage.all import *
 import torch
 

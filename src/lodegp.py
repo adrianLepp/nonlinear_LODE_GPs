@@ -22,7 +22,7 @@ class LODEGP(gpytorch.models.ExactGP):
         print(f"V:{V}")
         x, a, b = var("x, a, b")
         V_temp = [list(b) for b in V.rows()]
-        print(V_temp)
+        #print(V_temp)
         V = sage_eval(f"matrix({str(V_temp)})", locals={"x":x, "a":a, "b":b})
         Vt = V.transpose()
         kernel_matrix, self.kernel_translation_dict, parameter_dict = create_kernel_matrix_from_diagonal(D)
@@ -107,7 +107,7 @@ class LODEGP(gpytorch.models.ExactGP):
 
         # "Loss" for GPs - the marginal log likelihood
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
-        print(list(self.named_parameters()))
+        #print(list(self.named_parameters()))
         for i in range(training_iterations):
             optimizer.zero_grad()
             output = self(self.train_inputs[0])#FIXME: 
@@ -116,4 +116,4 @@ class LODEGP(gpytorch.models.ExactGP):
             print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
             optimizer.step()
 
-        print(list(self.named_parameters()))
+        #print(list(self.named_parameters()))
