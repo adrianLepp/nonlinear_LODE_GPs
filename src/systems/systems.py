@@ -1,14 +1,9 @@
 
-import gpytorch 
 from sage.all import *
 import sage
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
 from sage.calculus.var import var
-import time
 import torch
-import matplotlib.pyplot as plt
-from abc import ABC, abstractmethod
-import numpy as np
 
 #torch.set_default_tensor_type(torch.DoubleTensor)
 torch.set_default_dtype(torch.float64)
