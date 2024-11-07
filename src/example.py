@@ -10,13 +10,16 @@ import matplotlib.pyplot as plt
 import argparse
 import numpy as np
 from scipy.integrate import solve_ivp
+import json
+import pandas as pd
 # ----------------------------------------------------------------------------
 from  lodegp import LODEGP 
 from systems import Bipendulum, ThreeTank, System1, Inverted_Pendulum, Nonlinear_ThreeTank
 from helpers import saveDataToCsv, collectMetaInformation, saveSettingsToJson
 
-DATA_ID = 1 # TODO load DATA_ID from file
-MODEL_ID = 1 # TODO load MODEL_ID from file
+SIMULATION_ID:int = -1 # TODO load SIMULATION_ID from file
+MODEL_ID:int =  -1 # TODO load MODEL_ID from file
+CONFIG_FILE = 'config.json'
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -25,6 +28,7 @@ if __name__ == "__main__":
     parser.add_argument("--system", required=True, type=str, help="system to simulate")
     parser.add_argument("--save",  type=bool, help="save data", default=False)#required=True,
     parser.add_argument("--model", required=True, type=str, default="None", help="load or save model")
+    parser.add_argument("--model_id", type=int, help="id of the model to load")
     #parser.add_argument("--num3", required=True, type=int)
 
     args = parser.parse_args()
@@ -33,6 +37,7 @@ if __name__ == "__main__":
     if args.model == 'load':
         LOAD_MODEL = True
         SAVE_MODEL = False
+        MODEL_ID = args.model_id
     elif args.model == 'save':
         LOAD_MODEL = False
         SAVE_MODEL = True
@@ -40,14 +45,25 @@ if __name__ == "__main__":
         LOAD_MODEL = False
         SAVE_MODEL = False
 
+    with open(CONFIG_FILE,"r") as f:
+        config = json.load(f)
+        if SAVE_DATA:
+            SIMULATION_ID = config['simulation_id'] + 1
+        if SAVE_MODEL:
+            MODEL_ID = config['model_id'] + 1
+
+    #config = pd.read_json('config.json', lines=True)#
+
+
     print("\n----------------------------------------------------------------------------------\n")
     print(f"simulate {system_name}")
+
     if LOAD_MODEL:
         print(f"load model with model id {MODEL_ID}")
     if SAVE_MODEL:
         print(f"save model with model id {MODEL_ID}")
     if SAVE_DATA is True:
-        print(f"save data with data id {DATA_ID}")
+        print(f"save data with data id {SIMULATION_ID}")
 
     print("\n----------------------------------------------------------------------------------\n")
 
@@ -59,12 +75,13 @@ device = 'cpu'
 
 model_name = "lodegp"
 #system_name = "bipendulum"
-name = str(DATA_ID) + '_' + model_name + "_" + system_name
+name =  '_' + model_name + "_" + system_name
 
 model_dir = "data/"
-model_path = model_dir + name + ".pth"
+model_path = model_dir + str(MODEL_ID) + name + ".pth"
 
 data_dir = "../data/"
+data_path = data_dir + str(SIMULATION_ID) + name + ".csv"
 
 # %% setup
 
@@ -199,14 +216,20 @@ plt.show()
 
 if SAVE_MODEL:
     torch.save(model.state_dict(), model_path)
+    with open(CONFIG_FILE,"w") as f:
+        config['model_id'] = MODEL_ID
+        json.dump(config, f)
 
 if SAVE_DATA:
     data = {'time': test_x_np}
     for i in range(len(estimation[1])):
         data[f'f{i+1}'] = estimation[:, i]
-    saveDataToCsv(data_dir, name, data, overwrite=True)
+    saveDataToCsv(data_path, data, overwrite=True)
 
-    info = collectMetaInformation(DATA_ID, model_name, system_name, model.named_parameters(), np.mean(ode_error_list))
-    saveSettingsToJson(data_dir, name, info, overwrite=True)
-    DATA_ID += 1
+    info = collectMetaInformation(SIMULATION_ID, model_name, system_name, model.named_parameters(), np.mean(ode_error_list))
+    saveSettingsToJson(data_path, info, overwrite=True)
+    
+    with open(CONFIG_FILE,"w") as f:
+        config['simulation_id'] = SIMULATION_ID
+        json.dump(config, f)
 

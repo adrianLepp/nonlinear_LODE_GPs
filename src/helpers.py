@@ -31,8 +31,8 @@ def calc_finite_differences(sample, point_step_size, skip=False, number_of_sampl
         gradients_list.append(list((-sample[index] + sample[index+1])/point_step_size))
     return gradients_list
 
-def saveDataToCsv(folder:str, simName:str, data:dict, overwrite:bool=False):
-    fileName = folder + simName +  '.csv'
+def saveDataToCsv(simName:str, data:dict, overwrite:bool=False):
+    fileName = simName +  '.csv'
 
     if os.path.exists(fileName) and not overwrite:
         raise FileExistsError(f"The file {fileName} already exists.")
@@ -52,11 +52,10 @@ def collectMetaInformation(id:int,model_name:str, system_name:str, parameters, r
 
     return info
 
-def saveSettingsToJson(folder:str, simName:str, settings:dict, overwrite:bool=False):
-    fileName = folder + simName + '_settings.json'
-
+def saveSettingsToJson(simName:str, settings:dict, overwrite:bool=False):
+    fileName = simName + '.json'
     if os.path.exists(fileName) and not overwrite:
         raise FileExistsError(f"The file {fileName} already exists.")
 
-    with open(folder + simName + '.json',"w") as f:
+    with open(fileName,"w") as f:
         json.dump(settings, f)
