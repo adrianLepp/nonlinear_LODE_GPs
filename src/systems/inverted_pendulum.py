@@ -36,11 +36,6 @@ class Inverted_Pendulum(ODE_System):
         return A
     
     def get_ODEmatrix(self):
-        dx0 = x[1]
-        dx1 = x[1] * (- self.param.b / self.param.M) + x[2] * (- self.param.m * self.param.g / self.param.M) + x[4] / self.param.M
-        dx2 = x[3]
-        dx3 = x[1] * (self.param.b / (self.param.M * self.param.l)) + x[2] * ((self.param.M + self.param.m) * self.param.g / (self.param.M * self.param.l)) + x[4] / ( - self.param.M * self.param.l)
-        dx4 = 0
         A = matrix(R, Integer(2), Integer(3), [
             # 1. row
             (- self.param.b / self.param.M) * x - x**2 ,
