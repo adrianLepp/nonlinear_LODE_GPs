@@ -17,14 +17,15 @@ class Parameter():
             A= 0.0154
 
 class Nonlinear_ThreeTank(ODE_System):
-    def __init__(self):
+    def __init__(self, u_r_rel: float=0.3):
         super().__init__(4)
 
         self.param = Parameter()
 
-        u_r  = self.param.u*0.3  
+        u_r  = self.param.u*u_r_rel  
         x_r1, x_r2, x_r3 = self.get_equilibrium(u_r)
         print('equilibrium for nonlinear Threetank: ', x_r1, x_r2, x_r3)
+        self.equilibrium = [x_r1, x_r2, x_r3, u_r]
         self.A_r, self.b_r = self.get_linearized_state_space(u_r, x_r1, x_r2, x_r3)
 
     def get_equilibrium(self,u_r):

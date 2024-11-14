@@ -12,13 +12,15 @@ import numpy as np
 from scipy.integrate import solve_ivp
 import json
 import pandas as pd
+from result_reporter.data_saver import saveDataToCsv
+from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config
 # ----------------------------------------------------------------------------
 from  lodegp import LODEGP 
 from systems import Bipendulum, ThreeTank, System1, Inverted_Pendulum, Nonlinear_ThreeTank
-from helpers import saveDataToCsv, collectMetaInformation, saveSettingsToJson
+from helpers import  collectMetaInformation, saveSettingsToJson #saveDataToCsv,
 
-SIMULATION_ID:int = -1 # TODO load SIMULATION_ID from file
-MODEL_ID:int =  -1 # TODO load MODEL_ID from file
+SIMULATION_ID:int = -1 
+MODEL_ID:int =  -1 
 CONFIG_FILE = 'config.json'
 
 if __name__ == "__main__":
@@ -32,7 +34,7 @@ if __name__ == "__main__":
     #parser.add_argument("--num3", required=True, type=int)
 
     args = parser.parse_args()
-    system_name = args.system
+    system_name:str = args.system
     SAVE_DATA = args.save
     if args.model == 'load':
         LOAD_MODEL = True
@@ -47,6 +49,10 @@ if __name__ == "__main__":
 
     with open(CONFIG_FILE,"r") as f:
         config = json.load(f)
+        model_dir=config['model_dir']
+        data_dir=config['data_dir']
+        model_name = config['model_name']
+
         if SAVE_DATA:
             SIMULATION_ID = config['simulation_id'] + 1
         if SAVE_MODEL:
@@ -67,73 +73,113 @@ if __name__ == "__main__":
 
     print("\n----------------------------------------------------------------------------------\n")
 
-# %% config
+    # %% config
 
-#torch.set_default_tensor_type(torch.DoubleTensor)
-torch.set_default_dtype(torch.float64)
-device = 'cpu'
+    #torch.set_default_tensor_type(torch.DoubleTensor)
+    torch.set_default_dtype(torch.float64)
+    device = 'cpu'
 
-model_name = "lodegp"
-#system_name = "bipendulum"
-name =  '_' + model_name + "_" + system_name
+    #model_name = "lodegp"
+    #system_name = "bipendulum"
+    name =  '_' + model_name + "_" + system_name
 
-model_dir = "data/"
-model_path = model_dir + str(MODEL_ID) + name + ".pth"
+    #model_dir = "data/"
+    model_path = f'{model_dir}/{str(MODEL_ID)}{name}.pth'# model_dir + str(MODEL_ID) + name + ".pth"
 
-data_dir = "../data/"
-data_path = data_dir + str(SIMULATION_ID) + name + ".csv"
+    #data_dir = "../data/"
+    data_path = f'{data_dir}/{str(SIMULATION_ID)}{name}.csv'
+    #data_path = data_dir + str(SIMULATION_ID) + name + ".csv"
 
-# %% setup
+    # %% setup
 
-num_data = 100
-tStart = 0
-tEnd = 100 
-train_x = torch.linspace(tStart, tEnd, num_data)
+    num_data = 100
+    tStart = 0
+    tEnd = 100 
+    u_r_rel = 0.5
+    u_rel = 0.6
 
-test_start = 20
-test_end = 70 
-test_count = 500
-eval_step_size = (test_end-test_start)/test_count# 1e-4
+    test_start = 20
+    test_end = 70 
+    test_count = 500
+    eval_step_size = (test_end-test_start)/test_count# 1e-4
 
 
-match system_name:
-    case "bipendulum":
-        system = Bipendulum()
-    case "threetank":
-        system = ThreeTank()
-    case "system1":
-        system = System1()
-    case "inverted_pendulum":
-        system = Inverted_Pendulum()
-    case "nonlinear_threetank":
-        system = Nonlinear_ThreeTank()
-    case _:
-        raise ValueError(f"System {system_name} not found")
+def load_system(system_name:str):
 
-try:
-    solution = system.get_ODEsolution(train_x)
-except NotImplementedError:
-    print("No analytical solution available. Use state transition function instead.")
+    match system_name:
+        case "bipendulum":
+            system = Bipendulum()
+        case "threetank":
+            system = ThreeTank()
+        case "system1":
+            system = System1()
+        case "inverted_pendulum":
+            system = Inverted_Pendulum()
+        case "nonlinear_threetank":
+            system = Nonlinear_ThreeTank(u_r_rel)
+        case _:
+            raise ValueError(f"System {system_name} not found")
+        
+    return system
+    
+def simulate_system(system, tStart, tEnd, num_data):
 
-    ts = np.linspace(tStart, tEnd, num_data)
+    if LOAD_MODEL:
+        _training_data = get_training_data(MODEL_ID)
+        _model_config = get_model_config(MODEL_ID)
+        if _training_data is not None and _model_config is not None:
+            x0 = _model_config['init_state']
+            x_r = _model_config['system_param']
 
-    #TODO start value is all hand written
-    # x0 = np.zeros(5)
-    # angle= 1
-    # x0[2] = angle/180*np.pi
-    x0 = np.zeros(system.dimension)
+            train_x = torch.tensor(_training_data['time'])
+            solution = (
+                torch.tensor(_training_data[f'f{1}'])- x_r[0], 
+                torch.tensor(_training_data[f'f{2}'])- x_r[1], 
+                torch.tensor(_training_data[f'f{3}'])- x_r[2],
+                torch.tensor(_training_data[f'f{4}'])- x_r[3]
+            )
+            train_y = torch.stack(solution, -1)
+            #train_y = torch.tensor(_training_data['data'])
+            
+            
+        else:
+            raise ValueError("No training data found")
+    else:
+        train_x = torch.linspace(tStart, tEnd, num_data)
+        try:
+            solution = system.get_ODEsolution(train_x)
+            train_y = torch.stack(solution, -1)
+        except NotImplementedError:
+            print("No analytical solution available. Use state transition function instead.")
 
-    u_r = 0.3 * system.param.u
-    x_r = np.array([0.3995411173162123, 0.1757172664982792, 0.28762919190724573, u_r])
-    x0 = np.copy(x_r)
-    x0[3] = 0.5 * u_r
+            ts = np.linspace(tStart, tEnd, num_data)
 
-    sol = solve_ivp(system.stateTransition, [tStart, tEnd], x0, method='RK45', t_eval=ts,)#, max_step=dt ,  atol = 1, rtol = 1
-    x = sol.y.transpose() - x_r
+            #TODO start value is all hand written
+            # x0 = np.zeros(5)
+            # angle= 1
+            # x0[2] = angle/180*np.pi
+            x0 = np.zeros(system.dimension)
 
-    solution = (torch.tensor(x[:,0]), torch.tensor(x[:,1]), torch.tensor(x[:,2]), torch.tensor(x[:,3]))
-except:
-    print("Error in system")
+            u_r = u_r_rel * system.param.u
+            
+            x_r = np.array(system.equilibrium)
+
+            #x_r = np.array([0.3995411173162123, 0.1757172664982792, 0.28762919190724573, u_r])
+            x0 = np.copy(x_r)
+            x0[3] = u_rel * system.param.u
+
+            sol = solve_ivp(system.stateTransition, [tStart, tEnd], x0, method='RK45', t_eval=ts,)#, max_step=dt ,  atol = 1, rtol = 1
+            x = sol.y.transpose() - x_r
+
+            solution = (torch.tensor(x[:,0]), torch.tensor(x[:,1]), torch.tensor(x[:,2]), torch.tensor(x[:,3]))
+            train_y = torch.stack(solution, -1)
+        except:
+            print("Error in system")
+
+    return train_x, train_y, x0, x_r
+
+system = load_system(system_name)
+train_x, train_y, x0, x_r = simulate_system(system, tStart, tEnd, num_data)
 
 num_tasks = system.dimension
 system_matrix = system.get_ODEmatrix()
@@ -142,7 +188,6 @@ system_matrix = system.get_ODEmatrix()
 
 # %% train
 
-train_y = torch.stack(solution, -1)
 likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
 model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix)
 #model(train_x)
@@ -156,17 +201,17 @@ else:
 # %% test
 
 
-test_x = torch.linspace(test_start, test_end, test_count)
+#test_x = torch.linspace(test_start, test_end, test_count)
 # TODO what is this for?
-# second_derivative=True 
-# divider = 3 if second_derivative else 2
-# number_of_samples = int(test_count/divider)
-# test_x = torch.linspace(test_start, test_end, number_of_samples)
-# if second_derivative:
-#     test_x = torch.cat([test_x, test_x+torch.tensor(eval_step_size), test_x+torch.tensor(2*eval_step_size)])
-# else:
-#     test_x = torch.cat([test_x, test_x+torch.tensor(eval_step_size)])
-# test_x = test_x.sort()[0]
+second_derivative=False 
+divider = 3 if second_derivative else 2
+number_of_samples = int(test_count/divider)
+test_x = torch.linspace(test_start, test_end, number_of_samples)
+if second_derivative:
+    test_x = torch.cat([test_x, test_x+torch.tensor(eval_step_size), test_x+torch.tensor(2*eval_step_size)])
+else:
+    test_x = torch.cat([test_x, test_x+torch.tensor(eval_step_size)])
+test_x = test_x.sort()[0]
 
 model.eval()
 likelihood.eval()
@@ -191,7 +236,7 @@ for val in ode_test_vals:
         #ode_error_list[i].append(np.abs(globals()[f"ode{i+1}"](val)))
         ode_error_list[i].append(np.abs(ode[i](val)))
 
-print('ODE error', np.mean(ode_error_list))
+print('ODE error', np.mean(ode_error_list, axis=1))
 
 
 train_x_np = train_x.numpy()
@@ -213,21 +258,26 @@ plt.plot(test_x_np, estimation[:, 2], label="x3_est")
 plt.legend()
 plt.show()
 
-
+system_param = system.equilibrium
 if SAVE_MODEL:
     torch.save(model.state_dict(), model_path)
     with open(CONFIG_FILE,"w") as f:
         config['model_id'] = MODEL_ID
         json.dump(config, f)
+    add_modelConfig(MODEL_ID, system_name,  x0, system_param, tStart, tEnd, eval_step_size)
+    add_training_data(MODEL_ID, train_x_np, train_y_np)
 
 if SAVE_DATA:
-    data = {'time': test_x_np}
-    for i in range(len(estimation[1])):
-        data[f'f{i+1}'] = estimation[:, i]
-    saveDataToCsv(data_path, data, overwrite=True)
+    # data = {'time': test_x_np}
+    # for i in range(len(estimation[1])):
+    #     data[f'f{i+1}'] = estimation[:, i]
+    # saveDataToCsv(data_path, data, overwrite=True)
 
-    info = collectMetaInformation(SIMULATION_ID, model_name, system_name, model.named_parameters(), np.mean(ode_error_list))
-    saveSettingsToJson(data_path, info, overwrite=True)
+    add_simulationConfig(SIMULATION_ID, MODEL_ID, system_name, x0, system_param, tStart, tEnd, eval_step_size, np.mean(ode_error_list, axis=1))
+    add_simulation_data(SIMULATION_ID, test_x_np, estimation)
+
+    # info = collectMetaInformation(SIMULATION_ID, model_name, system_name, model.named_parameters(), np.mean(ode_error_list))
+    # saveSettingsToJson(data_path, info, overwrite=True)
     
     with open(CONFIG_FILE,"w") as f:
         config['simulation_id'] = SIMULATION_ID

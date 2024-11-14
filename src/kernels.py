@@ -239,8 +239,9 @@ def translate_kernel_matrix_to_gpytorch_kernel(kernelmatrix, paramdict, common_t
 
     return kernel_call_matrix
 
-
-
+#-----------------------------------------------
+# Ab hier ist der Code aktuell nicht relevant?
+#-----------------------------------------------
 
 
 def make_symmetric(matrix):
