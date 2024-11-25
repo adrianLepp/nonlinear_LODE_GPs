@@ -11,7 +11,6 @@ import argparse
 import numpy as np
 from scipy.integrate import solve_ivp
 import json
-import pandas as pd
 from result_reporter.data_saver import saveDataToCsv
 from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config
 # ----------------------------------------------------------------------------
