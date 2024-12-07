@@ -10,8 +10,10 @@ torch.set_default_dtype(torch.float64)
 
 
 class ODE_System():
-    def __init__(self, dimension):
-        self.dimension = dimension
+    def __init__(self, state_dimension:int, control_dimension:int = 0):
+        self.dimension = state_dimension + control_dimension
+        self.state_dimension = state_dimension
+        self.control_dimension = control_dimension
 
     # @property
     # @abstractmethod

@@ -8,9 +8,31 @@ import pprint
 import time
 import torch
 
-class LODEGP(gpytorch.models.ExactGP):
+def optimize_gp(gp, training_iterations=100):
+    # Find optimal model hyperparameters
+    gp.train()
+    gp.likelihood.train()
+
+    # Use the adam optimizer
+    optimizer = torch.optim.Adam(gp.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
+
+    # "Loss" for GPs - the marginal log likelihood
+    mll = gpytorch.mlls.ExactMarginalLogLikelihood(gp.likelihood, gp)
+    #print(list(self.named_parameters()))
+    for i in range(training_iterations):
+        optimizer.zero_grad()
+        output = gp(gp.train_inputs[0])#FIXME: 
+        loss = -mll(output, gp.train_targets)
+        loss.backward()
+        print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
+        optimizer.step()
+        gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_3))
+
+    #print(list(self.named_parameters()))
+
+class LODEGP_Deprecated(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood, num_tasks, A):
-        super(LODEGP, self).__init__(train_x, train_y, likelihood)
+        super(LODEGP_Deprecated, self).__init__(train_x, train_y, likelihood)
         self.mean_module = gpytorch.means.MultitaskMean(
             gpytorch.means.ZeroMean(), num_tasks=num_tasks
         )
@@ -96,24 +118,108 @@ class LODEGP(gpytorch.models.ExactGP):
         #covar_x = covar_x.flatten()
         #print(list(torch.linalg.eigh(covar_x)[0])[::-1])
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x) 
+
+
+class LODEGP(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood, num_tasks, A):
+        super(LODEGP, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.MultitaskMean(
+            gpytorch.means.ZeroMean(), num_tasks=num_tasks
+        )
+        
+        self.common_terms = {
+            "t_diff" : train_x-train_x.t(),
+            "t_sum" : train_x+train_x.t(),
+            "t_ones": torch.ones_like(train_x-train_x.t()),
+            "t_zeroes": torch.zeros_like(train_x-train_x.t())
+        }
+        
+        self.covar_module = LODE_Kernel(A, self.common_terms)
+
+    def forward(self, X):
+        if not torch.equal(X, self.train_inputs[0]):
+            self.common_terms["t_diff"] = X-X.t()
+            self.common_terms["t_sum"] = X+X.t()
+        mean_x = self.mean_module(X)
+        covar_x = self.covar_module(X, common_terms=self.common_terms)
+        return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x) 
     
-    def optimize(self, training_iterations=100):
-        # Find optimal model hyperparameters
-        self.train()
-        self.likelihood.train()
 
-        # Use the adam optimizer
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
+class Param_LODEGP(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood, num_tasks, A, x0):
+        super(Param_LODEGP, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.MultitaskMean(
+            gpytorch.means.ZeroMean(), num_tasks=num_tasks
+        )
+        
+        self.common_terms = {
+            "t_diff" : train_x-train_x.t(),
+            "t_sum" : train_x+train_x.t(),
+            "t_ones": torch.ones_like(train_x-train_x.t()),
+            "t_zeroes": torch.zeros_like(train_x-train_x.t())
+        }
+        
+        self.covar_module = Param_LODE_Kernel(A, x0, self.common_terms)
 
-        # "Loss" for GPs - the marginal log likelihood
-        mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
-        #print(list(self.named_parameters()))
-        for i in range(training_iterations):
-            optimizer.zero_grad()
-            output = self(self.train_inputs[0])#FIXME: 
-            loss = -mll(output, self.train_targets)
-            loss.backward()
-            print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
-            optimizer.step()
+    def forward(self, X):
+        if not torch.equal(X, self.train_inputs[0]):
+            self.common_terms["t_diff"] = X-X.t()
+            self.common_terms["t_sum"] = X+X.t()
+        mean_x = self.mean_module(X)
+        covar_x = self.covar_module(X, common_terms=self.common_terms)
+        return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x) 
+    
+class Mean_LODEGP(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood, num_tasks, A, mean_value):
+        super(Mean_LODEGP, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.MultitaskMean(
+            gpytorch.means.ConstantMean(constant_prior= gpytorch.priors.MultivariateNormalPrior(loc=mean_value, covariance_matrix=torch.eye(4))), num_tasks=num_tasks
+        ) 
+        #self.mean_module.initialize(constant=mean_value)
+        
+        self.common_terms = {
+            "t_diff" : train_x-train_x.t(),
+            "t_sum" : train_x+train_x.t(),
+            "t_ones": torch.ones_like(train_x-train_x.t()),
+            "t_zeroes": torch.zeros_like(train_x-train_x.t())
+        }
+        
+        self.covar_module = LODE_Kernel(A, self.common_terms)
 
-        #print(list(self.named_parameters()))
+    def forward(self, X):
+        if not torch.equal(X, self.train_inputs[0]):
+            self.common_terms["t_diff"] = X-X.t()
+            self.common_terms["t_sum"] = X+X.t()
+        mean_x = self.mean_module(X)
+        covar_x = self.covar_module(X, common_terms=self.common_terms)
+        return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x) 
+    
+class Changepoint_LODEGP(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood, num_tasks, A_list, changepoints:List[float]):
+        super(Changepoint_LODEGP, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.MultitaskMean(
+            gpytorch.means.ZeroMean(), num_tasks=num_tasks
+        )
+        
+        self.common_terms = {
+            "t_diff" : train_x-train_x.t(),
+            "t_sum" : train_x+train_x.t(),
+            "t_ones": torch.ones_like(train_x-train_x.t()),
+            "t_zeroes": torch.zeros_like(train_x-train_x.t())
+        }
+
+        covar_modules = []
+        for A in A_list:
+            covar_modules.append(LODE_Kernel(A, self.common_terms))
+        
+
+        self.covar_module = Drastic_changepoint_Kernel(covar_modules, changepoints, num_tasks)
+
+    def forward(self, X):
+        if not torch.equal(X, self.train_inputs[0]):
+            self.common_terms["t_diff"] = X-X.t()
+            self.common_terms["t_sum"] = X+X.t()
+        mean_x = self.mean_module(X)
+        covar_x = self.covar_module(X, common_terms=self.common_terms)
+        return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x) 
+    

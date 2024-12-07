@@ -123,10 +123,6 @@ def solve_for_equilibrium(A, b, equilibrium, solution):
 
     return A_e, b_e
 
-    equilibrium ={
-        'u': param.u * 0.3,
-    }
-
 
 #print(A(**equilibrium))#x1=x_e[0], x2=x_e[1], x3=x_e[2],
 

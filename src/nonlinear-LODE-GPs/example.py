@@ -9,15 +9,15 @@ import torch
 import matplotlib.pyplot as plt
 import argparse
 import numpy as np
-from scipy.integrate import solve_ivp
 import json
-from result_reporter.data_saver import saveDataToCsv
-from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config
+from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, add_reference_data
 # ----------------------------------------------------------------------------
-from  lodegp import LODEGP 
-from helpers import load_system, load_training_data, simulate_system, create_test_inputs
+from  lodegp import *
+from helpers import *
 
-CONTROL = True
+CONTROL = False
+REFERENCE = True
+linear = True
 
 SIMULATION_ID:int = -1 
 MODEL_ID:int =  -1 
@@ -43,6 +43,10 @@ if __name__ == "__main__":
     elif args.model == 'save':
         LOAD_MODEL = False
         SAVE_MODEL = True
+    elif args.model == 'control':
+        LOAD_MODEL = False
+        SAVE_MODEL = False
+        CONTROL = True
     else:
         LOAD_MODEL = False
         SAVE_MODEL = False
@@ -85,50 +89,31 @@ if __name__ == "__main__":
 
     # %% setup
 
-    num_data = 1000
-    tStart = 0
-    tEnd = 200
-    u_r_rel = 0.1
-    u_rel = 0.2
+    optim_steps =300
 
-    test_start = 0
-    test_end = 300
-    test_count = 1000
-    eval_step_size = (test_end-test_start)/test_count# 1e-4
-
-system = load_system(system_name, u_r_rel)
-
-if CONTROL:
-    x_r = np.array(system.equilibrium)
-    x0 = np.copy(x_r)
-    #x0[3] = u_rel * system.param.u
-
-    x_target = np.array([1.78e-01, 7.81e-02, 1.28e-01, 2.47e-05])
-
-    train_x = torch.tensor([
-        tStart, 
-        tStart + 1, 
-        tEnd- 1, 
-        tEnd,
-        tEnd + 1,
-        tEnd + 100
-    ])
-    train_y = torch.tensor([
-        x0- x_r, 
-        x0- x_r, 
-        x_target - x_r, 
-        x_target - x_r, 
-        x_target - x_r, 
-        x_target - x_r
-    ])
+    train_time = Time_Def(0, 200, 200)
+    test_time = Time_Def(0, 200, 2000)
     
-elif LOAD_MODEL:
+    
+    u_r_rel = 0.2
+
+    u_rel = 0.4
+
+system = load_system(system_name)
+num_tasks = system.dimension
+  
+if LOAD_MODEL:
     train_x, train_y, x0, x_r = load_training_data(MODEL_ID)    
 else:
-    train_x, train_y, x0, x_r = simulate_system(system, tStart, tEnd, num_data, u_rel)
+    system_matrix , equilibrium = system.get_ODEmatrix(u_r_rel)
+    x_r = np.array(equilibrium)
+    x0 = x_r
 
-num_tasks = system.dimension
-system_matrix = system.get_ODEmatrix()
+    u = np.linspace(u_rel * system.param.u, u_rel * system.param.u, train_time.count)
+
+    train_x, train_y= simulate_system(system, x0[0:system.state_dimension], train_time.start, train_time.end, train_time.count, u)
+    train_y = train_y - torch.tensor(x_r)
+
 
 
 
@@ -140,14 +125,15 @@ model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix)
 if LOAD_MODEL:
     model.load_state_dict(torch.load(model_path, map_location=device))
 else:
-    model.optimize()
+    optimize_gp(model,optim_steps)
 
 # %% test
 
-test_x = create_test_inputs(test_count, eval_step_size, test_start, test_end, 1)
+test_x = create_test_inputs(test_time.count, test_time.step, test_time.start, test_time.end, 1)
 
 model.eval()
 likelihood.eval()
+
 
 #output = model(test_x)
 with torch.no_grad():
@@ -155,78 +141,72 @@ with torch.no_grad():
 
 # %% recreate ODE from splines of prediction
 
-fkt = list()
-for dimension in range(model.kernelsize):
-    output_channel = output.mean[:, dimension]
-    fkt.append(spline([(t, y) for t, y in zip(test_x, output_channel)]))
+ode, ode_error_list = get_ode_from_spline(model, system, output, test_x)
 
-ode = system.get_ODEfrom_spline(fkt)
-ode_test_vals = test_x
+# train_x_np = train_x.numpy()
+# train_y_np = train_y.numpy() + x_r
+# test_x_np = test_x.numpy()
+# estimation = output.mean.numpy() + x_r
 
-ode_error_list = [[] for _ in range(model.ode_count)]
-for val in ode_test_vals:
-    for i in range(model.ode_count):
-        #ode_error_list[i].append(np.abs(globals()[f"ode{i+1}"](val)))
-        ode_error_list[i].append(np.abs(ode[i](val)))
+train_data = Data_Def(train_x.numpy(), train_y.numpy() + x_r, system.state_dimension, system.control_dimension)
+test_data = Data_Def(test_x.numpy(), output.mean.numpy() + x_r, system.state_dimension, system.control_dimension)
 
-print('ODE error', np.mean(ode_error_list, axis=1))
+#variance = output.variance.numpy()
+#std = output.stddev.diag_embed().numpy()
+#lower, upper = output.confidence_region()
 
-train_x_np = train_x.numpy()
-train_y_np = train_y.numpy() + x_r
-test_x_np = test_x.numpy()
-estimation = output.mean.numpy() + x_r
+if REFERENCE:
+    #u_ref = estimation[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten()
+    if linear:
+        u_ref = np.linspace(u_rel * system.param.u, u_rel * system.param.u, test_time.count)
+        u_ref = u_ref - x_r[system.state_dimension:system.state_dimension+system.control_dimension]
+        x0_e = x0 - x_r
 
+        ref_x, ref_y= simulate_system(system, x0_e[0:system.state_dimension], test_time.start, test_time.end, test_time.count, u_ref, linear=True)
+        ref_data = Data_Def(ref_x.numpy(), ref_y.numpy() + x_r, system.state_dimension, system.control_dimension)
+    else:
+        #u_ref = np.linspace(u_rel * system.param.u, u_rel * system.param.u, test_count)
+        u_ref = test_data.y[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten()
+        ref_x, ref_y= simulate_system(system, x0[0:system.state_dimension], test_time.start, test_time.end, test_time.count, u_ref, linear=False)
 
-fig, ax1 = plt.subplots()
-ax2 = ax1.twinx()
+        ref_data = Data_Def(ref_x.numpy(), ref_y.numpy(), system.state_dimension, system.control_dimension)
 
-ax1.plot(train_x_np, train_y_np[:, 0], 'o', label="x1")
-ax1.plot(train_x_np, train_y_np[:, 1], 'o', label="x2")
-ax1.plot(train_x_np, train_y_np[:, 2], 'o', label="x3")
-ax2.plot(train_x_np, train_y_np[:, 3], '.', label="x4")
+plot_results(train_data, test_data, ref_data)
 
-
-ax1.plot(test_x_np, estimation[:, 0], label="x1_est")
-ax1.plot(test_x_np, estimation[:, 1], label="x2_est")
-ax1.plot(test_x_np, estimation[:, 2], label="x3_est")
-ax2.plot(test_x_np, estimation[:, 3] , '--', label="x4_est")
-
-ax1.legend()
-#ax2.legend()
-ax1.grid(True)
-
-plt.show()
 
 # fig, ax1 = plt.subplots()
+# ax2 = ax1.twinx()
 
-# color = 'tab:blue'
-# ax1.set_xlabel('time')
-# ax1.set_ylabel('x1, x2, x3', color=color)
-# ax1.plot(test_x_np, estimation[:, 0], label="x1_est", color='tab:blue')
-# ax1.plot(test_x_np, estimation[:, 1], label="x2_est", color='tab:orange')
-# ax1.plot(test_x_np, estimation[:, 2], label="x3_est", color='tab:green')
-# ax1.tick_params(axis='y', labelcolor=color)
-# ax1.legend(loc='upper left')
+# for i in range(system.state_dimension):
+#     color = f'C{i}'
+#     ax1.plot(train_x_np, train_y_np[:, i], '.', color=color, label=f'x{i+1}_train')    
+#     if REFERENCE:
+#         ax1.plot(ref_x_np, ref_y_np[:, i], '--', color=color, label=f'x{i+1}_ref')
+#     ax1.plot(test_x_np, estimation[:, i], color=color, label=f'x{i+1}_est', alpha=0.5)
+
+# for i in range(system.control_dimension):
+#     idx = system.state_dimension + i
+#     color = f'C{idx}'
+#     ax2.plot(train_x_np, train_y_np[:, idx], '.', color=color, label=f'x{idx+1}_train')
+#     if REFERENCE:
+#         ax2.plot(ref_x_np, ref_y_np[:, idx], '--', color=color, label=f'x{idx+1}_ref')
+#     ax2.plot(test_x_np, estimation[:, idx], color=color, label=f'x{idx+1}est', alpha=0.5)
+
+# ax2.tick_params(axis='y', labelcolor=color)
+# ax1.legend()
+# ax2.legend()
 # ax1.grid(True)
 
-# ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
-# color = 'tab:red'
-# ax2.set_ylabel('x4', color=color)  # we already handled the x-label with ax1
-# ax2.plot(test_x_np, estimation[:, 3], label="x4_est", color=color)
-# ax2.tick_params(axis='y', labelcolor=color)
-# ax2.legend(loc='upper right')
-
-# fig.tight_layout()  # otherwise the right y-label is slightly clipped
 # plt.show()
 
-system_param = system.equilibrium
+system_param = equilibrium
 if SAVE_MODEL:
     torch.save(model.state_dict(), model_path)
     with open(CONFIG_FILE,"w") as f:
         config['model_id'] = MODEL_ID
         json.dump(config, f)
-    add_modelConfig(MODEL_ID, system_name,  x0, system_param, tStart, tEnd, eval_step_size)
-    add_training_data(MODEL_ID, train_x_np, train_y_np)
+    add_modelConfig(MODEL_ID, system_name,  x0, system_param, train_time.start, train_time.end, train_time.step)
+    add_training_data(MODEL_ID, train_data.time, train_data.y)
 
 if SAVE_DATA:
     # data = {'time': test_x_np}
@@ -234,8 +214,15 @@ if SAVE_DATA:
     #     data[f'f{i+1}'] = estimation[:, i]
     # saveDataToCsv(data_path, data, overwrite=True)
 
-    add_simulationConfig(SIMULATION_ID, MODEL_ID, system_name, x0, system_param, tStart, tEnd, eval_step_size, np.mean(ode_error_list, axis=1))
-    add_simulation_data(SIMULATION_ID, test_x_np, estimation)
+    add_simulationConfig(SIMULATION_ID, MODEL_ID, system_name, x0, system_param, test_time.start, test_time.end, test_time.step, np.mean(ode_error_list, axis=1))
+    add_simulation_data(SIMULATION_ID, test_data.time, test_data.y)
+
+    if REFERENCE:
+        if linear:
+            type = 'linear'
+        else:
+            type = 'nonlinear'
+        add_reference_data(SIMULATION_ID, type, ref_data.time, ref_data.y)
 
     # info = collectMetaInformation(SIMULATION_ID, model_name, system_name, model.named_parameters(), np.mean(ode_error_list))
     # saveSettingsToJson(data_path, info, overwrite=True)

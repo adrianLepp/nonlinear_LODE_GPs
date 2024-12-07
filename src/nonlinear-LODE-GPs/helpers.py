@@ -6,9 +6,11 @@ import torch
 import numpy as np
 from scipy.integrate import solve_ivp
 from systems import *
-from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config
+import matplotlib.pyplot as plt
+import json
+from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config, add_reference_data
 
-def load_system(system_name:str, u=None):
+def load_system(system_name:str):
 
     match system_name:
         case "bipendulum":
@@ -20,7 +22,7 @@ def load_system(system_name:str, u=None):
         case "inverted_pendulum":
             system = Inverted_Pendulum()
         case "nonlinear_threetank":
-            system = Nonlinear_ThreeTank(u)
+            system = Nonlinear_ThreeTank()
         case _:
             raise ValueError(f"System {system_name} not found")
         
@@ -46,7 +48,7 @@ def load_training_data(model_id:int):
     else:
         raise ValueError("No training data found")
 
-def simulate_system(system, tStart, tEnd, num_data, u_rel = None):
+def simulate_system(system, x0, tStart, tEnd, num_data, u = None, linear=False):
     train_x = torch.linspace(tStart, tEnd, num_data)
     try:
         solution = system.get_ODEsolution(train_x)
@@ -55,19 +57,22 @@ def simulate_system(system, tStart, tEnd, num_data, u_rel = None):
         print("No analytical solution available. Use state transition function instead.")
 
         ts = np.linspace(tStart, tEnd, num_data)
-        x0 = np.zeros(system.dimension)
-        x_r = np.array(system.equilibrium)
-        x0 = np.copy(x_r)
-        x0[3] = u_rel * system.param.u
-        sol = solve_ivp(system.stateTransition, [tStart, tEnd], x0, method='RK45', t_eval=ts,)#, max_step=dt ,  atol = 1, rtol = 1
-        x = sol.y.transpose() - x_r
+        dt = (tEnd-tStart)/num_data
+        
+        if linear:
+            sol = solve_ivp(system.linear_stateTransition, [tStart, tEnd], x0, method='RK45', t_eval=ts, args=(u,dt))#, max_step=dt ,  atol = 1, rtol = 1
+        else:
+            sol = solve_ivp(system.stateTransition, [tStart, tEnd], x0, method='RK45', t_eval=ts, args=(u,dt))#, max_step=dt ,  atol = 1, rtol = 1
+        
 
-        solution = (torch.tensor(x[:,0]), torch.tensor(x[:,1]), torch.tensor(x[:,2]), torch.tensor(x[:,3]))
+        x = sol.y.transpose()
+
+        solution = (torch.tensor(x[:,0]), torch.tensor(x[:,1]), torch.tensor(x[:,2]), torch.tensor(u))
         train_y = torch.stack(solution, -1)
     except:
         print("Error in system")
 
-    return train_x, train_y, x0, x_r
+    return train_x, train_y
 
 def create_test_inputs(test_count:int, eval_step_size:int, test_start:float, test_end:float, derivatives:int):
     divider = derivatives + 1 
@@ -89,6 +94,24 @@ def create_test_inputs(test_count:int, eval_step_size:int, test_start:float, tes
     test_x = torch.cat(data_list).sort()[0]
     return test_x
 
+def get_ode_from_spline(model, system, output, test_x):
+    fkt = list()
+    for dimension in range(model.covar_module.kernelsize):
+        output_channel = output.mean[:, dimension]
+        fkt.append(spline([(t, y) for t, y in zip(test_x, output_channel)]))
+
+    ode = system.get_ODEfrom_spline(fkt)
+    ode_test_vals = test_x
+
+    ode_error_list = [[] for _ in range(model.covar_module.ode_count)]
+    for val in ode_test_vals:
+        for i in range(model.covar_module.ode_count):
+            #ode_error_list[i].append(np.abs(globals()[f"ode{i+1}"](val)))
+            ode_error_list[i].append(np.abs(ode[i](val)))
+
+    print('ODE error', np.mean(ode_error_list, axis=1))
+    return ode, ode_error_list
+
 def calc_finite_differences(sample, point_step_size, skip=False, number_of_samples=0):
     """
     param skip: Decides whether to skip every second value of the sample.
@@ -108,32 +131,110 @@ def calc_finite_differences(sample, point_step_size, skip=False, number_of_sampl
         gradients_list.append(list((-sample[index] + sample[index+1])/point_step_size))
     return gradients_list
 
-# def saveDataToCsv(simName:str, data:dict, overwrite:bool=False):
-#     fileName = simName +  '.csv'
-
-#     if os.path.exists(fileName) and not overwrite:
-#         raise FileExistsError(f"The file {fileName} already exists.")
+def equilibrium_base_change(time, states, equilibriums, changepoints, add=True):
     
-#     df = pd.DataFrame(data)
-#     df.to_csv(fileName, index=False)
+    for i in range(len(equilibriums)):
+        if not add:
+            equilibriums[i] = - torch.tensor(equilibriums[i])  
+        else: 
+            equilibriums[i] =  torch.tensor(equilibriums[i])  
+    
+
+    for i in range(len(time)):
+        if time[i] <= changepoints[0]:
+            states[i] = states[i] + equilibriums[0]
+        else:
+            states[i] = states[i] + equilibriums[1]
+
+    return states
+
+class Time_Def():
+    def __init__(self, start, end, count=None, step=None):
+        self.start = start
+        self.end = end
+        if count is None and step is not None:
+            self.count = int(ceil((end-start)/step))
+            self.step = step
+        elif count is not None and step is None:
+            self.count = count
+            self.step = (end-start)/count
+        else:
+            raise ValueError("Either count or step must be given")
+        
+
+class Data_Def():
+    def __init__(self, x,y,state_dim:int, control_dim:int):
+        self.time = x
+        self.y = y
+        self.state_dim = state_dim
+        self.control_dim = control_dim
+
+def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None):
+    fig, ax1 = plt.subplots()
+    ax2 = ax1.twinx()
+
+    for i in range(test.state_dim):
+        color = f'C{i}'
+        ax1.plot(train.time, train.y[:, i], '.', color=color, label=f'x{i+1}_train')    
+        ax1.plot(test.time, test.y[:, i], color=color, label=f'x{i+1}_est', alpha=0.5)
+        if ref is not None:
+            ax1.plot(ref.time, ref.y[:, i], '--', color=color, label=f'x{i+1}_ref')
+
+    for i in range(test.control_dim):
+        idx = test.state_dim + i
+        color = f'C{idx}'
+        ax2.plot(train.time, train.y[:, idx], '.', color=color, label=f'x{idx+1}_train')
+        ax2.plot(test.time, test.y[:, idx], color=color, label=f'x{idx+1}est', alpha=0.5)
+        if ref is not None:
+            ax2.plot(ref.time, ref.y[:, idx], '--', color=color, label=f'x{idx+1}_ref')
+
+    ax2.tick_params(axis='y', labelcolor=color)
+    ax1.legend()
+    ax2.legend()
+    ax1.grid(True)
+
+    plt.show()
 
 
-# def collectMetaInformation(id:int,model_name:str, system_name:str, parameters, rms):
-#     info = {}
-#     info['date'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-#     #info['gp_param'] = dict(parameters)
-#     info['model'] = model_name
-#     info['system'] = system_name
-#     info['rms'] = rms
-#     info['id'] = id
+def save_results(
+        model, 
+        system_param, 
+        x0, 
+        sim_id:int, 
+        model_id:int, 
+        config_file:str, 
+        system_name:str, 
+        config:dict, 
+        model_path:str, 
+        train_data:Data_Def, 
+        test_data:Data_Def, 
+        train_time:Time_Def, 
+        test_time:Time_Def, 
+        error=None, 
+        ref_data:Data_Def=None, 
+        linear=False
+    ):
 
-#     return info
+    if error is None:
+        error = []
+    
+    torch.save(model.state_dict(), model_path)
+    with open(config_file,"w") as f:
+        config['model_id'] = model_id
+        json.dump(config, f)
+    add_modelConfig(model_id, system_name,  x0, system_param, train_time.start, train_time.end, train_time.step)
+    add_training_data(model_id, train_data.time, train_data.y)
 
-# def saveSettingsToJson(simName:str, settings:dict, overwrite:bool=False):
-#     fileName = simName + '.json'
-#     if os.path.exists(fileName) and not overwrite:
-#         raise FileExistsError(f"The file {fileName} already exists.")
+    add_simulationConfig(sim_id, model_id, system_name, x0, system_param, test_time.start, test_time.end, test_time.step, error)
+    add_simulation_data(sim_id, test_data.time, test_data.y)
 
-#     with open(fileName,"w") as f:
-#         json.dump(settings, f)
-
+    if ref_data is not None:
+        if linear:
+            type = 'linear'
+        else:
+            type = 'nonlinear'
+        add_reference_data(sim_id, type, ref_data.time, ref_data.y)
+    
+    with open(config_file,"w") as f:
+        config['simulation_id'] = sim_id
+        json.dump(config, f)
