@@ -151,9 +151,9 @@ ode, ode_error_list = get_ode_from_spline(model, system, output, test_x)
 train_data = Data_Def(train_x.numpy(), train_y.numpy() + x_r, system.state_dimension, system.control_dimension)
 test_data = Data_Def(test_x.numpy(), output.mean.numpy() + x_r, system.state_dimension, system.control_dimension)
 
-#variance = output.variance.numpy()
-#std = output.stddev.diag_embed().numpy()
-#lower, upper = output.confidence_region()
+# variance = output.variance.numpy()
+# std = output.stddev.diag_embed().numpy()
+# lower, upper = output.confidence_region()
 
 if REFERENCE:
     #u_ref = estimation[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten()

@@ -162,6 +162,24 @@ class Time_Def():
             raise ValueError("Either count or step must be given")
         
 
+class State_Description():
+    equilibrium:np.ndarray
+    init:np.ndarray
+    target:np.ndarray
+    min:np.ndarray
+    max:np.ndarray
+
+    def __init__(self, equilibrium:np.ndarray, init:np.ndarray, target:np.ndarray=None,  min:np.ndarray=None, max:np.ndarray=None):
+        self.equilibrium = equilibrium
+        self.init = init
+
+        if target is None:
+            self.target = equilibrium
+        else:
+            self.target = target
+        self.min = min
+        self.max = max
+
 class Data_Def():
     def __init__(self, x,y,state_dim:int, control_dim:int):
         self.time = x

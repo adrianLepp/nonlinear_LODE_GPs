@@ -89,6 +89,8 @@ class LODE_Kernel(Kernel):
             #    K_list = [kk.unsqueeze(1) for kk in K_list]
             K = einops.rearrange(K_list, '(t1 t2) h w -> (h t1) (w t2)', t1=kernel_count, t2=kernel_count)  
 
+            if diag:
+                return K.diag()
             return K 
         
         def __str__(self, substituted=False):

@@ -8,7 +8,7 @@ import pprint
 import time
 import torch
 
-def optimize_gp(gp, training_iterations=100):
+def optimize_gp(gp, training_iterations=100, verbose=True):
     # Find optimal model hyperparameters
     gp.train()
     gp.likelihood.train()
@@ -24,9 +24,13 @@ def optimize_gp(gp, training_iterations=100):
         output = gp(gp.train_inputs[0])#FIXME: 
         loss = -mll(output, gp.train_targets)
         loss.backward()
-        print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
+        if verbose is True:
+            print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
         optimizer.step()
-        gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_3))
+
+    #print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
+        #gp.likelihood.noise = torch.tensor(1e-8)
+        #gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_3))
 
     #print(list(self.named_parameters()))
 
@@ -169,13 +173,17 @@ class Param_LODEGP(gpytorch.models.ExactGP):
         covar_x = self.covar_module(X, common_terms=self.common_terms)
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x) 
     
-class Mean_LODEGP(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, num_tasks, A, mean_value):
-        super(Mean_LODEGP, self).__init__(train_x, train_y, likelihood)
+class Equilibrium_LODEGP(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood, num_tasks, A, mean_values):
+        super(Equilibrium_LODEGP, self).__init__(train_x, train_y, likelihood)
+
+        mean_modules = []
+        for i in range(len(mean_values)):
+            mean_modules.append(gpytorch.means.ConstantMean(constant_constraint=gpytorch.constraints.Interval(mean_values[i], mean_values[i]+1e-8)))
+            mean_modules[i].initialize(constant=torch.tensor(mean_values[i], requires_grad=False))
         self.mean_module = gpytorch.means.MultitaskMean(
-            gpytorch.means.ConstantMean(constant_prior= gpytorch.priors.MultivariateNormalPrior(loc=mean_value, covariance_matrix=torch.eye(4))), num_tasks=num_tasks
+            mean_modules, num_tasks=num_tasks #constant_prior= gpytorch.priors.MultivariateNormalPrior(loc=mean_value, covariance_matrix=torch.eye(4))
         ) 
-        #self.mean_module.initialize(constant=mean_value)
         
         self.common_terms = {
             "t_diff" : train_x-train_x.t(),
