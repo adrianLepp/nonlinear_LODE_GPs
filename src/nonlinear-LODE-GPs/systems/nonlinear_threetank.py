@@ -155,13 +155,27 @@ class Nonlinear_ThreeTank(ODE_System):
 
         return (ode1, ode2, ode3)
     
-    def stateTransition(self, t, x, u, dt):
-        #for i in range(0, len(x)):
-            # if x[i] < 0:
-            #     x[i] = 0
-        control_idx = floor(abs(t/dt-0.000000001))
+    def stateTransition(self, t, x, u=None, dt=None, model=None):
+        for i in range(len(x)):
+            if x[i] < 0:
+                x[i] = 0
 
-        dx0 = 1/self.param.A*(self.param._u* u[control_idx]-self.param.c13*sign(x[0]-x[2])*sqrt(2*self.param.g*abs(x[0]-x[2]))) #self.param.u is x[3]
+        if model is not None:
+            with torch.no_grad():
+                t_tensor = torch.tensor([t])
+                outputs = model(torch.tensor([t]))
+                reference = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=t_tensor, mask=model.mask).mean.numpy() + model.equilibrium
+
+            u_current = reference[0,3]
+            control_idx = floor(abs(t/dt-0.000000001))
+            u[control_idx] = u_current
+        elif u is not None: #if isinstance(u, (list, tuple)):
+            control_idx = floor(abs(t/dt-0.000000001))
+            u_current = u[control_idx,0]
+
+        
+
+        dx0 = 1/self.param.A*(self.param._u* u_current-self.param.c13*sign(x[0]-x[2])*sqrt(2*self.param.g*abs(x[0]-x[2]))) #self.param.u is x[3]
         dx1 = 1/self.param.A*(self.param.c32*sign(x[2]-x[1])*sqrt(2*self.param.g*abs(x[2]-x[1]))-self.param.c2R*sqrt(2*self.param.g*abs(x[1])))
         dx2 = 1/self.param.A*(self.param.c13*sign(x[0]-x[2])*sqrt(2*self.param.g*abs(x[0]-x[2]))-self.param.c32*sign(x[2]-x[1])*sqrt(2*self.param.g*abs(x[2]-x[1])))
         #

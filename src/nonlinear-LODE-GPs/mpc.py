@@ -44,11 +44,13 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
 
         #gp.train()
         #losses[i] = loss.item()
-        gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_3))
-        if gp.covar_module.model_parameters.signal_variance_3 > 0.1:
-            gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(torch.tensor(0.1))
 
-        gp.covar_module.model_parameters.lengthscale_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.lengthscale_3))
+        gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_3))
+        max_signal_variance = 1.0
+        if gp.covar_module.model_parameters.signal_variance_3 > max_signal_variance:
+            gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(torch.tensor(max_signal_variance))
+
+        # gp.covar_module.model_parameters.lengthscale_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.lengthscale_3))
         min_lengthscale = 3.0
         if gp.covar_module.model_parameters.lengthscale_3 < min_lengthscale:
             gp.covar_module.model_parameters.lengthscale_3 = torch.nn.Parameter(torch.tensor(min_lengthscale))
@@ -63,30 +65,16 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
     train_x = torch.tensor(trajectory_time)
     train_y = torch.tensor(trajectory) - torch.tensor(states.equilibrium)
 
+    likelihood = MultitaskGaussianLikelihoodWithMissingObs(num_tasks=num_tasks, original_shape=train_y.shape)
+    model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix)
+
     manual_noise = torch.tensor(train_noise)
-
-
-    task_noise = [1e-8, 1e-8, 1e-8, 1e-7]
-    # likelihood2 = FixedTaskNoiseMultitaskLikelihood(num_tasks=num_tasks ,noise=torch.tensor(train_noise)*1e-8,  rank=0)
-    # likelihood3 = FixedTaskNoiseMultitaskLikelihood2(num_tasks=num_tasks ,data_noise=torch.tensor(train_noise), task_noise=task_noise, rank=0)
-    likelihood4 = FixedTaskNoiseMultitaskLikelihood_LinOP(num_tasks=num_tasks ,noise=torch.tensor(train_noise), rank=0)
-    #likelihood5 = FixedTaskNoiseMultitaskLikelihood_LinOP(num_tasks=num_tasks ,noise=torch.tensor(train_noise),task_noise=task_noise, rank=0)
-    likelihood6 = MultitaskGaussianLikelihoodWithMissingObs(num_tasks=num_tasks, original_shape=train_y.shape)
-
-    # manual_noise = 1e-8 * torch.ones(len(train_x)*num_tasks)
-
-    # manual_noise[3] = 1e-10
-    # manual_noise[7] = 1e-10
-    # # Model 1 - 3
-    # manual_noise[5::3] = 2.5
-    # manual_noise[4::3] = 1.
-    # manual_noise[3::3] = 1.
-
     _, mask = create_mask(train_y)
     noise_strat = MaskedManualNoise(mask, manual_noise)
-    likelihood6.set_noise_strategy(noise_strat)
+    likelihood.set_noise_strategy(noise_strat)
 
-    model = LODEGP(train_x, train_y, likelihood6, num_tasks, system_matrix)
+    model.mask = mask
+    model.equilibrium = states.equilibrium
 
     optimize_mpc_gp(model, train_x, mask_stacked=torch.ones((train_x.shape[0], num_tasks)).bool(), training_iterations=optim_steps)
 
@@ -94,17 +82,21 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
     #optimize_gp(model,optim_steps)
 
     return model, mask
-    
 
-def mpc_algorithm_2(system:ODE_System, model:LODEGP, predict_ll:gpytorch.likelihoods.Likelihood, states:State_Description,  t_end, dt_control, reference_strategy=1, optim_steps=10, dt_step = 0.1 ):
+
+def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_end, dt_control, reference_strategy=1, optim_steps=10, dt_step = 0.1 ):
     # init time
     step_count = int(ceil(dt_control / dt_step))
     #dt_step =  dt_control /step_count
     control_count = int(t_end / dt_control)
 
+    sim_time = np.linspace(0, t_end, control_count * step_count + 1)
+
     # init states
     x_sim = np.zeros((control_count * step_count + 1, system.dimension))
     x_sim[0] = states.init
+    u_sim = np.zeros((control_count * step_count + 1, system.control_dimension))
+    u_sim[0] = states.init[system.state_dimension::]
 
     x_lode = np.zeros((control_count * step_count + 1, system.dimension))
     x_lode[0] = states.init
@@ -113,30 +105,17 @@ def mpc_algorithm_2(system:ODE_System, model:LODEGP, predict_ll:gpytorch.likelih
     t_ref = np.zeros(control_count + 1)
     num_tasks = system.dimension
 
-    # misc
-
-    #trajectory, trajectory_time, train_noise = create_reference(1, Time_Def(0,t_end,count=1), x_0, x_target)
-
 
     for i in range(control_count):
         # init time
         t_i = i * dt_control
         x_i = x_sim[i*step_count]
-        control_time = Time_Def(t_i, t_end, step=dt_control* dt_step)
+        control_time = Time_Def(t_i, t_end, step=dt_control)#* dt_step
         step_time = Time_Def(t_i, t_i + dt_control , step=dt_step)
 
         # generate training Data
         trajectory, trajectory_time, train_noise = create_reference(reference_strategy, control_time, states, x_i)
         manual_noise = torch.tensor(train_noise)
-        #trajectory, trajectory_time, train_noise = create_reference(reference_strategy, step_time, x_i, states.target)
-
-        # trajectory = [x_0, x_target]
-        # trajectory_time = [step_time.start, step_time.end]
-
-        # start_noise = 1e5
-        # end_noise = start_noise * exp((log(1/start_noise))/(t_end-dt_control)*t_i)
-        # train_noise = [1, end_noise]
-        # print(f"end_noise: {end_noise}")
 
         x_ref[i] = x_i
         t_ref[i] = t_i
@@ -156,13 +135,11 @@ def mpc_algorithm_2(system:ODE_System, model:LODEGP, predict_ll:gpytorch.likelih
 
         optimize_mpc_gp(model,torch.tensor(trajectory_time), mask_stacked=torch.ones((torch.tensor(trajectory_time).shape[0], num_tasks)).bool(), training_iterations=optim_steps, verbose=False)
 
-        print(f'Iter {i}')
+        print(f'Iter {i}, time: {t_i}')
         named_parameters = list(model.named_parameters())
         for j in range(len(named_parameters)):
             print(named_parameters[j][0], named_parameters[j][1].data) #.item()
-        # print("Iter", iter, "Signal Variance: ", torch.exp(list(model.named_parameters())[2][1].data))
-        # print("Iter", iter, "Lengthscale: ", torch.exp(list(model.named_parameters())[3][1].data))
-        #optimize_gp(model, optim_steps, verbose=False)
+
 
         # prediction
         model.eval()
@@ -170,22 +147,36 @@ def mpc_algorithm_2(system:ODE_System, model:LODEGP, predict_ll:gpytorch.likelih
         model.likelihood.eval()
         with torch.no_grad():
             #reference = predict_ll(model(torch.linspace(step_time.start, step_time.end, step_time.count))) 
-            current_time = torch.linspace(step_time.start, step_time.end, step_time.count)
-            outputs = model(current_time)
-            reference = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=current_time, mask=mask)
+            reference_time = torch.linspace(step_time.start, step_time.end, step_time.count+1)
+            outputs = model(reference_time)
+            reference = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=reference_time, mask=mask).mean.numpy() + states.equilibrium
 
-        x_ref_current = reference.mean.numpy() + states.equilibrium #should be 10x4
+        #x_ref_current = reference.mean.numpy() + states.equilibrium #should be 10x4
+        #x_lode[i*step_count+1:(i+1)*step_count+1] = reference[1::]
+        x_lode[i*step_count:(i+1)*step_count+1] = reference
 
-        u_ref = x_ref_current[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten() # should be 10x1 
+        u_ref = reference[:,system.state_dimension:system.state_dimension+system.control_dimension]#.flatten() # should be 10x1 
+        #u_ref = x_lode[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten()
 
         # simulate system
+        u_sim[i*step_count+1:(i+1)*step_count+1] = u_ref[0:-1]
+        #t_step , x_sim_step= simulate_system(system, x_i[0:system.state_dimension], step_time.start, step_time.end, step_time.count, u_ref , linear=False) # check t_step
+        sol = solve_ivp(system.stateTransition, [step_time.start, step_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=reference_time.numpy(), args=(u_sim, step_time.step ))#, max_step=dt ,  atol = 1, rtol = 1
+        x_sim_xurrent = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
 
-        t_step , x_sim_step= simulate_system(system, x_i[0:system.state_dimension], 0, step_time.end, step_time.count, u_ref, linear=False) # check t_step
 
-        x_sim[i*step_count+1:(i+1)*step_count+1] = x_sim_step.numpy()
-        x_lode[i*step_count+1:(i+1)*step_count+1] = x_ref_current
+        #x_sim[i*step_count+1:(i+1)*step_count+1] = x_sim_step.numpy()
+        x_sim[i*step_count+1:(i+1)*step_count+1] =    x_sim_xurrent
 
-    sim_time = np.linspace(0, t_end, control_count * step_count + 1)
+        train_data = Data_Def(trajectory_time, trajectory, system.state_dimension, system.control_dimension)
+        test_data = Data_Def(reference_time.numpy(), reference, system.state_dimension, system.control_dimension)
+        #sim_data = Data_Def(t_step.numpy(), x_sim_step.numpy(), system.state_dimension, system.control_dimension)
+        sim_data = Data_Def(reference_time.numpy(), x_sim_xurrent, system.state_dimension, system.control_dimension)
+
+
+
+        #plot_results(train_data, test_data, sim_data)# 
+
     sim_data = Data_Def(sim_time, x_sim, system.state_dimension, system.control_dimension)
     lode_data = Data_Def(sim_time, x_lode, system.state_dimension, system.control_dimension)
 
@@ -196,51 +187,6 @@ def mpc_algorithm_2(system:ODE_System, model:LODEGP, predict_ll:gpytorch.likelih
     train_data = Data_Def(t_ref, x_ref, system.state_dimension, system.control_dimension)
 
     return sim_data, train_data, lode_data
-
-
-def mpc_algorithm(test_time:Time_Def, x_0, x_target, task_noise, model:LODEGP, system, likelihood, num_tasks:int, optim_steps:int):
-    x_sim = np.zeros((test_time.count, system.dimension))
-    x_sim[0] = x_0
-    x_ref = x_sim.copy()
-
-    for i in range(test_time.count - 1):
-        t_i = test_time.start + i * test_time.step
-        # generate training Data
-        train_time = Time_Def(t_i, test_time.end, step=1)
-        trajectory, trajectory_time, train_noise = create_reference(1, train_time, x_sim[i], x_target)
-
-        train_x = torch.tensor(trajectory_time)
-        train_y = torch.tensor(trajectory) - torch.tensor(x_target)
-
-        # update GP model
-        model.likelihood = FixedTaskNoiseMultitaskLikelihood2(num_tasks=num_tasks ,data_noise=torch.tensor(train_noise), task_noise=task_noise, rank=0)
-        model.set_train_data(train_x, train_y, strict=False)
-        optimize_gp(model,optim_steps)
-
-        # prediction
-        test_x = create_test_inputs(test_time.count-i, test_time.step, t_i, test_time.end, 1)
-        model.eval()
-        likelihood.eval()
-        with torch.no_grad():
-            output = likelihood(model(test_x))
-
-        x_ref[i+1] = output.mean[0].numpy() + x_target
-        u_ref = x_ref[i+1][system.state_dimension:system.state_dimension+system.control_dimension]
-        #u_ref = x_ref[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten()
-        
-        
-        ref_x, ref_y= simulate_system(system, x_sim[i][0:system.state_dimension], 0, test_time.step, 1, u_ref, linear=False)
-        x_sim[i+1] = ref_y[0].numpy()
-
-    time = np.linspace(test_time.start, test_time.end, test_time.count)
-
-    ref_data = Data_Def(time, x_sim, system.state_dimension, system.control_dimension)
-    test_data = Data_Def(time, x_ref, system.state_dimension, system.control_dimension)
-    train_data = Data_Def(np.array(trajectory_time), np.array(trajectory), system.state_dimension, system.control_dimension)
-
-    plot_results(train_data, test_data, ref_data)
-
-    return x_sim, x_ref
 
 def mpc_feed_forward(test_time:Time_Def, x_0, x_e, model:LODEGP, likelihood, system, SIM_ID:int, MODEL_ID:int, model_path, model_dir, optim_steps:int, train_x, train_y):
     cnt = 0
@@ -351,4 +297,5 @@ def create_reference(strategy:int, time_obj:Time_Def, states:State_Description, 
     else:
         raise ValueError(f"strategy {str(strategy)} not supported")
     
+    ## end_noise = start_noise * exp((log(1/start_noise))/(t_end-dt_control)*t_i)
     return trajectory, trajectory_time, noise

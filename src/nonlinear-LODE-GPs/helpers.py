@@ -54,7 +54,7 @@ def simulate_system(system, x0, tStart, tEnd, num_data, u = None, linear=False):
         solution = system.get_ODEsolution(train_x)
         train_y = torch.stack(solution, -1)
     except NotImplementedError:
-        print("No analytical solution available. Use state transition function instead.")
+        #print("No analytical solution available. Use state transition function instead.")
 
         ts = np.linspace(tStart, tEnd, num_data)
         dt = (tEnd-tStart)/num_data
@@ -188,27 +188,33 @@ class Data_Def():
         self.control_dim = control_dim
 
 def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None):
+    labels = ['train', 'gp', 'sim']
     fig, ax1 = plt.subplots()
     ax2 = ax1.twinx()
 
     for i in range(test.state_dim):
         color = f'C{i}'
-        ax1.plot(train.time, train.y[:, i], '.', color=color, label=f'x{i+1}_train')    
-        ax1.plot(test.time, test.y[:, i], color=color, label=f'x{i+1}_est', alpha=0.5)
+        ax1.plot(train.time, train.y[:, i], '.', color=color, label=f'x{i+1}_{labels[0]}')    
+        ax1.plot(test.time, test.y[:, i], color=color, label=f'x{i+1}_{labels[1]}', alpha=0.5)
         if ref is not None:
-            ax1.plot(ref.time, ref.y[:, i], '--', color=color, label=f'x{i+1}_ref')
+            ax1.plot(ref.time, ref.y[:, i], '--', color=color, label=f'x{i+1}_{labels[2]}')
 
     for i in range(test.control_dim):
         idx = test.state_dim + i
         color = f'C{idx}'
-        ax2.plot(train.time, train.y[:, idx], '.', color=color, label=f'x{idx+1}_train')
-        ax2.plot(test.time, test.y[:, idx], color=color, label=f'x{idx+1}est', alpha=0.5)
+        ax2.plot(train.time, train.y[:, idx], '.', color=color, label=f'x{idx+1}_{labels[1]}')
+        ax2.plot(test.time, test.y[:, idx], color=color, label=f'x{idx+1}_{labels[1]}', alpha=0.5)
         if ref is not None:
-            ax2.plot(ref.time, ref.y[:, idx], '--', color=color, label=f'x{idx+1}_ref')
+            ax2.plot(ref.time, ref.y[:, idx], '--', color=color, label=f'x{idx+1}_{labels[2]}')
 
     ax2.tick_params(axis='y', labelcolor=color)
-    ax1.legend()
-    ax2.legend()
+
+    lines, labels = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax2.legend(lines + lines2, labels + labels2, loc=0)
+
+    #ax1.legend()
+    #ax2.legend()
     ax1.grid(True)
 
     plt.show()

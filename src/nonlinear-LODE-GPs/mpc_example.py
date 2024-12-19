@@ -12,7 +12,7 @@ from  lodegp import LODEGP, optimize_gp
 from helpers import *
 from likelihoods import *
 from masking import *
-from mpc import mpc_algorithm, mpc_feed_forward, create_reference, mpc_algorithm_2, pretrain
+from mpc import mpc_algorithm, mpc_feed_forward, create_reference, pretrain
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
@@ -53,19 +53,19 @@ print("\n-----------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 
 
-optim_steps = 50
+optim_steps = 10
 pretrain_steps = 50
 
 reference_strategie = 3
 
 
 dt_step = 0.1
-t_end = 10
-control_step = t_end /4
+t_end = 100
+dt_control = t_end /t_end
 
 
 u_1 = 0.1
-u_2 = 0.11
+u_2 = 0.2
 
 
 system = load_system(system_name)
@@ -86,16 +86,16 @@ x_max = np.array([0.6,0.6,0.6,system.param.u*2])
 
 states = State_Description(x_e, x_0, min=x_min, max=x_max)
 
-likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
+#likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
 
 
-control_time = Time_Def(0, t_end, step=control_step * dt_step)
+control_time = Time_Def(0, t_end, step=dt_control )#* dt_step
 model, mask = pretrain(system_matrix, num_tasks, control_time, pretrain_steps, reference_strategie, states)
 
 #if FEEDBACK:
     #x_sim, x_ref = mpc_algorithm(test_time, x_0, x_e, task_noise, model, system, likelihood, num_tasks, optim_steps)
-x_sim, x_ref, x_lode = mpc_algorithm_2(system, model, likelihood, states, t_end, control_step, reference_strategie, optim_steps, dt_step=dt_step)
-plot_results(x_ref, x_sim, x_lode)
+x_sim, x_ref, x_lode = mpc_algorithm(system, model, states, t_end, dt_control, reference_strategie, optim_steps, dt_step=dt_step)
+plot_results(x_ref, x_lode, x_sim)
 #else:
 #    mpc_feed_forward(test_time, x_0, x_e, model, likelihood, system, SIM_ID, MODEL_ID, model_path, model_dir, optim_steps, train_x, train_y)
 
