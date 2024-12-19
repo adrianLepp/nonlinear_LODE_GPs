@@ -61,7 +61,7 @@ reference_strategie = 3
 
 dt_step = 0.1
 t_end = 10
-control_step = t_end /t_end
+control_step = t_end /4
 
 
 u_1 = 0.1
@@ -89,7 +89,7 @@ states = State_Description(x_e, x_0, min=x_min, max=x_max)
 likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
 
 
-control_time = Time_Def(0, t_end, step=control_step/dt_step)
+control_time = Time_Def(0, t_end, step=control_step * dt_step)
 model, mask = pretrain(system_matrix, num_tasks, control_time, pretrain_steps, reference_strategie, states)
 
 #if FEEDBACK:

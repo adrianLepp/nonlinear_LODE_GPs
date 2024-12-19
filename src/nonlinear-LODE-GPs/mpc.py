@@ -33,20 +33,26 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
         output = gp(train_x)#FIXME: 
         loss = -mll(output, gp.train_targets)
 
-        gp.eval()
-        #list(model.named_parameters())[2][1].requires_grad = True
-        #list(model.named_parameters())[3][1].requires_grad = True
-        output_eval = gp(train_x)
-        mean_eval = output_eval.mean
+        # gp.eval()
+        # output_eval = gp(train_x)
+        # mean_eval = output_eval.mean
 
         loss.backward()
         if verbose is True:
             print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
         optimizer.step()
 
-        gp.train()
+        #gp.train()
         #losses[i] = loss.item()
         gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_3))
+        if gp.covar_module.model_parameters.signal_variance_3 > 0.1:
+            gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(torch.tensor(0.1))
+
+        gp.covar_module.model_parameters.lengthscale_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.lengthscale_3))
+        min_lengthscale = 3.0
+        if gp.covar_module.model_parameters.lengthscale_3 < min_lengthscale:
+            gp.covar_module.model_parameters.lengthscale_3 = torch.nn.Parameter(torch.tensor(min_lengthscale))
+
 
     #print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
 
@@ -106,7 +112,6 @@ def mpc_algorithm_2(system:ODE_System, model:LODEGP, predict_ll:gpytorch.likelih
     x_ref = np.zeros((control_count + 1, system.dimension))
     t_ref = np.zeros(control_count + 1)
     num_tasks = system.dimension
-    task_noise = [1e-8, 1e-8, 1e-8, 1e-7]
 
     # misc
 
@@ -117,7 +122,7 @@ def mpc_algorithm_2(system:ODE_System, model:LODEGP, predict_ll:gpytorch.likelih
         # init time
         t_i = i * dt_control
         x_i = x_sim[i*step_count]
-        control_time = Time_Def(t_i, t_end, step=dt_control/dt_step)
+        control_time = Time_Def(t_i, t_end, step=dt_control* dt_step)
         step_time = Time_Def(t_i, t_i + dt_control , step=dt_step)
 
         # generate training Data
@@ -150,6 +155,13 @@ def mpc_algorithm_2(system:ODE_System, model:LODEGP, predict_ll:gpytorch.likelih
         model.likelihood.set_noise_strategy(noise_strategy)
 
         optimize_mpc_gp(model,torch.tensor(trajectory_time), mask_stacked=torch.ones((torch.tensor(trajectory_time).shape[0], num_tasks)).bool(), training_iterations=optim_steps, verbose=False)
+
+        print(f'Iter {i}')
+        named_parameters = list(model.named_parameters())
+        for j in range(len(named_parameters)):
+            print(named_parameters[j][0], named_parameters[j][1].data) #.item()
+        # print("Iter", iter, "Signal Variance: ", torch.exp(list(model.named_parameters())[2][1].data))
+        # print("Iter", iter, "Lengthscale: ", torch.exp(list(model.named_parameters())[3][1].data))
         #optimize_gp(model, optim_steps, verbose=False)
 
         # prediction
