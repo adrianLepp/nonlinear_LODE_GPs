@@ -18,33 +18,23 @@ def update_gp(model:LODEGP, train_x, train_y, noise, mask):
     return
 
 def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, verbose=True):
-    # Find optimal model hyperparameters
     gp.train()
     gp.likelihood.train()
 
-    # Use the adam optimizer
-    optimizer = torch.optim.Adam(gp.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
+    optimizer = torch.optim.Adam(gp.parameters(), lr=0.1) 
 
-    # "Loss" for GPs - the marginal log likelihood
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(gp.likelihood, gp)
-    #print(list(self.named_parameters()))
     for i in range(training_iterations):
         optimizer.zero_grad()
-        output = gp(train_x)#FIXME: 
+        output = gp(train_x)
         loss = -mll(output, gp.train_targets)
-
-        # gp.eval()
-        # output_eval = gp(train_x)
-        # mean_eval = output_eval.mean
 
         loss.backward()
         if verbose is True:
             print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
         optimizer.step()
 
-        #gp.train()
-        #losses[i] = loss.item()
-
+        # enforce constraints (heuristics)
         gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_3))
         max_signal_variance = 1.0
         if gp.covar_module.model_parameters.signal_variance_3 > max_signal_variance:
@@ -78,13 +68,10 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
 
     optimize_mpc_gp(model, train_x, mask_stacked=torch.ones((train_x.shape[0], num_tasks)).bool(), training_iterations=optim_steps)
 
-    
-    #optimize_gp(model,optim_steps)
-
     return model, mask
 
 
-def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_end, dt_control, reference_strategy=1, optim_steps=10, dt_step = 0.1 ):
+def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_end, dt_control, reference_strategy=1, optim_steps=10, dt_step = 0.1, plot_single_steps=False ):
     # init time
     step_count = int(ceil(dt_control / dt_step))
     #dt_step =  dt_control /step_count
@@ -105,7 +92,7 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_
     t_ref = np.zeros(control_count + 1)
     num_tasks = system.dimension
 
-
+    # control loop
     for i in range(control_count):
         # init time
         t_i = i * dt_control
@@ -143,47 +130,40 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_
 
         # prediction
         model.eval()
-        #predict_ll.eval()
         model.likelihood.eval()
         with torch.no_grad():
-            #reference = predict_ll(model(torch.linspace(step_time.start, step_time.end, step_time.count))) 
             reference_time = torch.linspace(step_time.start, step_time.end, step_time.count+1)
             outputs = model(reference_time)
             reference = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=reference_time, mask=mask).mean.numpy() + states.equilibrium
 
-        #x_ref_current = reference.mean.numpy() + states.equilibrium #should be 10x4
-        #x_lode[i*step_count+1:(i+1)*step_count+1] = reference[1::]
         x_lode[i*step_count:(i+1)*step_count+1] = reference
 
-        u_ref = reference[:,system.state_dimension:system.state_dimension+system.control_dimension]#.flatten() # should be 10x1 
+        u_ref = reference[:,system.state_dimension:system.state_dimension+system.control_dimension]#.flatten()
         #u_ref = x_lode[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten()
 
         # simulate system
         u_sim[i*step_count+1:(i+1)*step_count+1] = u_ref[0:-1]
-        #t_step , x_sim_step= simulate_system(system, x_i[0:system.state_dimension], step_time.start, step_time.end, step_time.count, u_ref , linear=False) # check t_step
+        #t_step , x_sim_step= simulate_system(system, x_i[0:system.state_dimension], step_time.start, step_time.end, step_time.count, u_ref , linear=False)
         sol = solve_ivp(system.stateTransition, [step_time.start, step_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=reference_time.numpy(), args=(u_sim, step_time.step ))#, max_step=dt ,  atol = 1, rtol = 1
-        x_sim_xurrent = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
+        x_sim_current = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
 
 
         #x_sim[i*step_count+1:(i+1)*step_count+1] = x_sim_step.numpy()
-        x_sim[i*step_count+1:(i+1)*step_count+1] =    x_sim_xurrent
+        x_sim[i*step_count+1:(i+1)*step_count+1] =    x_sim_current
 
-        train_data = Data_Def(trajectory_time, trajectory, system.state_dimension, system.control_dimension)
-        test_data = Data_Def(reference_time.numpy(), reference, system.state_dimension, system.control_dimension)
-        #sim_data = Data_Def(t_step.numpy(), x_sim_step.numpy(), system.state_dimension, system.control_dimension)
-        sim_data = Data_Def(reference_time.numpy(), x_sim_xurrent, system.state_dimension, system.control_dimension)
+        if plot_single_steps:
+            train_data = Data_Def(trajectory_time, trajectory, system.state_dimension, system.control_dimension)
+            test_data = Data_Def(reference_time.numpy(), reference, system.state_dimension, system.control_dimension)
+            sim_data = Data_Def(reference_time.numpy(), x_sim_current, system.state_dimension, system.control_dimension)
+            plot_results(train_data, test_data, sim_data)# 
 
-
-
-        #plot_results(train_data, test_data, sim_data)# 
-
-    sim_data = Data_Def(sim_time, x_sim, system.state_dimension, system.control_dimension)
-    lode_data = Data_Def(sim_time, x_lode, system.state_dimension, system.control_dimension)
-
-    #train_data = Data_Def(np.array(trajectory_time), np.array(trajectory), system.state_dimension, system.control_dimension)
-
+    
+    
     x_ref[-1] = states.target
     t_ref[-1] = t_end
+    
+    sim_data = Data_Def(sim_time, x_sim, system.state_dimension, system.control_dimension)
+    lode_data = Data_Def(sim_time, x_lode, system.state_dimension, system.control_dimension)
     train_data = Data_Def(t_ref, x_ref, system.state_dimension, system.control_dimension)
 
     return sim_data, train_data, lode_data
@@ -231,6 +211,7 @@ def create_reference(strategy:int, time_obj:Time_Def, states:State_Description, 
     - 3: soft constraints at (max + min)/2 with variance (max - min)/2
     - 4: one start point
     '''
+    # TODO: noise is system specific and needs to given as parameter
     start_noise = [1e-8, 1e-8, 1e-8, 1e-10]
     end_noise = [1e-8, 1e-8, 1e-8, 1e-10]
     control_dim = 3
@@ -267,7 +248,7 @@ def create_reference(strategy:int, time_obj:Time_Def, states:State_Description, 
             raise ValueError("Max and min values are required for reference strategy 3")
         
         x_mean = (states.max + states.min) / 2
-        x_noise = (states.max - states.min) / 2 
+        x_noise = (states.max - states.min) / 2
 
         trajectory_time = np.linspace(time_obj.start, time_obj.end, time_obj.count+1).flatten()
 
