@@ -35,15 +35,16 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
         optimizer.step()
 
         # enforce constraints (heuristics)
-        gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_3))
-        max_signal_variance = 1.0
-        if gp.covar_module.model_parameters.signal_variance_3 > max_signal_variance:
-            gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(torch.tensor(max_signal_variance))
+        #FIXME: system specific
+        gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_2))
+        max_signal_variance = 1
+        if gp.covar_module.model_parameters.signal_variance_2 > max_signal_variance:
+            gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(torch.tensor(max_signal_variance))
 
         # gp.covar_module.model_parameters.lengthscale_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.lengthscale_3))
         min_lengthscale = 3.0
-        if gp.covar_module.model_parameters.lengthscale_3 < min_lengthscale:
-            gp.covar_module.model_parameters.lengthscale_3 = torch.nn.Parameter(torch.tensor(min_lengthscale))
+        if gp.covar_module.model_parameters.lengthscale_2 < min_lengthscale:
+            gp.covar_module.model_parameters.lengthscale_2 = torch.nn.Parameter(torch.tensor(min_lengthscale))
 
 
     #print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
@@ -77,12 +78,15 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_
     #dt_step =  dt_control /step_count
     control_count = int(t_end / dt_control)
 
-    sim_time = np.linspace(0, t_end, control_count * step_count + 1)
+    factor = 2
+
+    sim_time = np.linspace(0, t_end * factor, factor * control_count * step_count + 1)
+    gp_time = np.linspace(0, t_end , control_count * step_count + 1)
 
     # init states
-    x_sim = np.zeros((control_count * step_count + 1, system.dimension))
+    x_sim = np.zeros((factor * control_count * step_count + 1, system.dimension)) 
     x_sim[0] = states.init
-    u_sim = np.zeros((control_count * step_count + 1, system.control_dimension))
+    u_sim = np.zeros((factor * control_count * step_count + 1, system.control_dimension)) 
     u_sim[0] = states.init[system.state_dimension::]
 
     x_lode = np.zeros((control_count * step_count + 1, system.dimension))
@@ -161,9 +165,19 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_
     
     x_ref[-1] = states.target
     t_ref[-1] = t_end
+
+    u_sim[(i+1)*step_count+1::] = states.equilibrium[system.state_dimension::]
+    x_i = x_sim[(i+1)*step_count]
+    reference_time = np.linspace(t_end, t_end*factor, int((t_end*factor - t_end)/dt_step+1))
+
+
+    sol = solve_ivp(system.stateTransition, [t_end, t_end * factor], x_i[0:system.state_dimension], method='RK45', t_eval=reference_time, args=(u_sim, step_time.step ))#, max_step=dt ,  atol = 1, rtol = 1
+    x_sim_current = np.concatenate([sol.y.transpose()[1::], u_sim[(i+1)*step_count:-1]], axis=1)
+
+    x_sim[(i+1)*step_count+1::] =    x_sim_current
     
     sim_data = Data_Def(sim_time, x_sim, system.state_dimension, system.control_dimension)
-    lode_data = Data_Def(sim_time, x_lode, system.state_dimension, system.control_dimension)
+    lode_data = Data_Def(gp_time, x_lode, system.state_dimension, system.control_dimension)
     train_data = Data_Def(t_ref, x_ref, system.state_dimension, system.control_dimension)
 
     return sim_data, train_data, lode_data
@@ -212,9 +226,10 @@ def create_reference(strategy:int, time_obj:Time_Def, states:State_Description, 
     - 4: one start point
     '''
     # TODO: noise is system specific and needs to given as parameter
-    start_noise = [1e-8, 1e-8, 1e-8, 1e-10]
-    end_noise = [1e-8, 1e-8, 1e-8, 1e-10]
-    control_dim = 3
+    start_noise = states.max * 1e-8
+    end_noise = start_noise
+    #start_noise = [1e-8, 1e-8, 1e-8, 1e-10]
+    #end_noise = [1e-8, 1e-8, 1e-8, 1e-10]
 
     if x_0 is not  None:
         states.init = x_0

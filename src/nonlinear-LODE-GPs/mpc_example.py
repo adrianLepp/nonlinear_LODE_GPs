@@ -20,7 +20,7 @@ CONFIG_FILE = 'config.json'
 
 FEEDBACK = True
 
-system_name = "nonlinear_threetank"
+system_name = "nonlinear_watertank"
 
 with open(CONFIG_FILE,"r") as f:
     config = json.load(f)
@@ -58,12 +58,12 @@ reference_strategie =  3 # check create_reference() in mpc.py for details
 
 
 dt_step = 0.1 # time step for simulation and gp model
-t_end = 10
+t_end = 100
 dt_control = t_end /t_end # time step for control loops. set to t_end for feedforward control in one step
 
 
-u_1 = 0.1   # control input to find equilibrium where we start
-u_2 = 0.11 # control input to find equilibrium where we want to end and linearize around
+u_1 = 0.2   # control input to find equilibrium where we start
+u_2 = 0.3 # control input to find equilibrium where we want to end and linearize around
 
 
 system = load_system(system_name)
@@ -79,8 +79,8 @@ system_matrix , equilibrium = system.get_ODEmatrix(u_2)
 x_e = np.array(equilibrium)
 
 # soft constraints for states
-x_min = np.array([0,0,0,0])
-x_max = np.array([0.6,0.6,0.6,system.param.u*2])
+x_min = np.array(system.x_min)
+x_max = np.array(system.x_max)
 
 states = State_Description(x_e, x_0, min=x_min, max=x_max)
 

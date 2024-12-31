@@ -2,15 +2,15 @@
 from sage.all import *
 
 
-class Parameter():
-            u = 1.2371e-4 * 0.1
-            c13= 2.5046e-5
-            c32= 2.5046e-5
-            c2R= 1.9988e-5
-            g= 9.81 
-            A= 0.0154
+# class Parameter():
+#             u = 1.2371e-4 * 0.1
+#             c13= 2.5046e-5
+#             c32= 2.5046e-5
+#             c2R= 1.9988e-5
+#             g= 9.81 
+#             A= 0.0154
 
-param = Parameter()
+# param = Parameter()
 
 #u_e = param.u * 0.1
 
@@ -39,24 +39,24 @@ param = Parameter()
 # F3 = symbolic_expression(1/param.A*(param.c13*sqrt(2*param.g*(x-z))-param.c32*sqrt(2*param.g*(z-y))))
 
 
-x1, x2, x3, u = var('x1, x2, x3, u', domain='positive')#domain='real'
+# x1, x2, x3, u = var('x1, x2, x3, u', domain='positive')#domain='real'
 
-f1 = symbolic_expression(1/param.A*(u-param.c13*sqrt(2*param.g*(x1-x3)))).function(x1,x3,u)
-f2 = symbolic_expression(1/param.A*(param.c32*sqrt(2*param.g*(x3-x2))-param.c2R*sqrt(2*param.g*(x2)))).function(x2,x3)
-f3 = symbolic_expression(1/param.A*(param.c13*sqrt(2*param.g*(x1-x3))-param.c32*sqrt(2*param.g*(x3-x2)))).function(x1,x2,x3)
-states = [x1, x2, x3]
-control = [u]
-system_eqations = [f1, f2, f3] 
+# f1 = symbolic_expression(1/param.A*(u-param.c13*sqrt(2*param.g*(x1-x3)))).function(x1,x3,u)
+# f2 = symbolic_expression(1/param.A*(param.c32*sqrt(2*param.g*(x3-x2))-param.c2R*sqrt(2*param.g*(x2)))).function(x2,x3)
+# f3 = symbolic_expression(1/param.A*(param.c13*sqrt(2*param.g*(x1-x3))-param.c32*sqrt(2*param.g*(x3-x2)))).function(x1,x2,x3)
+# states = [x1, x2, x3]
+# control = [u]
+# system_eqations = [f1, f2, f3] 
 
 
 
-constraints = [
-    #   x > z, 
-    #   z > y, 
-    #   x > 0, 
-    #   y > 0, 
-    #   z > 0
-    ] 
+# constraints = [
+#     #   x > z, 
+#     #   z > y, 
+#     #   x > 0, 
+#     #   y > 0, 
+#     #   z > 0
+#     ] 
 
 #constraint = x1 >=x3
 
@@ -106,8 +106,8 @@ def get_equilibrium_equations(system_equations,states, control):
     solutions = find_equilibrium(eqn, states)
     solution = solutions[0]
 
-    A = jacobian(system_eqations, states)
-    b = jacobian(system_eqations, control)
+    A = jacobian(system_equations, states)
+    b = jacobian(system_equations, control)
 
     return solution, A, b
 
