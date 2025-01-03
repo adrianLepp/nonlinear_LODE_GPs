@@ -125,11 +125,14 @@ class LODEGP_Deprecated(gpytorch.models.ExactGP):
 
 
 class LODEGP(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, num_tasks, A):
+    def __init__(self, train_x, train_y, likelihood, num_tasks, A, mean_module:gpytorch.means.Mean=None):
         super(LODEGP, self).__init__(train_x, train_y, likelihood)
-        self.mean_module = gpytorch.means.MultitaskMean(
-            gpytorch.means.ZeroMean(), num_tasks=num_tasks
-        )
+        if mean_module is None:
+            self.mean_module = gpytorch.means.MultitaskMean(
+                gpytorch.means.ZeroMean(), num_tasks=num_tasks
+            )
+        else:
+            self.mean_module = mean_module
         
         self.common_terms = {
             "t_diff" : train_x-train_x.t(),
@@ -179,8 +182,11 @@ class Equilibrium_LODEGP(gpytorch.models.ExactGP):
 
         mean_modules = []
         for i in range(len(mean_values)):
-            mean_modules.append(gpytorch.means.ConstantMean(constant_constraint=gpytorch.constraints.Interval(mean_values[i], mean_values[i]+1e-8)))
-            mean_modules[i].initialize(constant=torch.tensor(mean_values[i], requires_grad=False))
+            mean_modules.append(gpytorch.means.ConstantMean(
+                constant_prior=gpytorch.priors.NormalPrior(mean_values[i],1e-16),
+                constant_constraint=gpytorch.constraints.Interval(mean_values[i]-1e-12, mean_values[i]+1e-12)
+            ))
+            #mean_modules[i].initialize(constant=torch.tensor(mean_values[i], requires_grad=False))
         self.mean_module = gpytorch.means.MultitaskMean(
             mean_modules, num_tasks=num_tasks #constant_prior= gpytorch.priors.MultivariateNormalPrior(loc=mean_value, covariance_matrix=torch.eye(4))
         ) 

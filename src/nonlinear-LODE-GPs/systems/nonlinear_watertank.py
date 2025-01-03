@@ -84,7 +84,7 @@ class Nonlinear_Watertank(ODE_System):
             with torch.no_grad():
                 t_tensor = torch.tensor([t])
                 outputs = model(torch.tensor([t]))
-                reference = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=t_tensor, mask=model.mask).mean.numpy() + model.equilibrium
+                reference = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=t_tensor, mask=model.mask).mean.numpy() #+ model.equilibrium
 
             u_current = reference[0,2]
             

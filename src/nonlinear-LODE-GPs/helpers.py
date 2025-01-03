@@ -70,7 +70,7 @@ def simulate_system(system, x0, tStart, tEnd, num_data, u = None, linear=False):
 
         x = sol.y.transpose()
 
-        solution = (torch.tensor(x[:,0]), torch.tensor(x[:,1]), torch.tensor(x[:,2]), torch.tensor(u)) #FIXME: model specific
+        solution = (torch.tensor(x[:,0]), torch.tensor(x[:,1]), torch.tensor(x[:,2]), torch.tensor(u.squeeze())) #FIXME: model specific
         train_y = torch.stack(solution, -1)
     except:
         print("Error in system")

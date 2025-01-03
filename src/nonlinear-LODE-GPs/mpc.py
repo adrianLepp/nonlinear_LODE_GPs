@@ -13,6 +13,7 @@ from  lodegp import LODEGP, optimize_gp
 from helpers import *
 from likelihoods import *
 from masking import *
+from mean_modules import Equilibrium_Mean
 
 def update_gp(model:LODEGP, train_x, train_y, noise, mask):
     return
@@ -54,10 +55,11 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
     trajectory, trajectory_time, train_noise = create_reference(reference_strategie, time_obj, states)
 
     train_x = torch.tensor(trajectory_time)
-    train_y = torch.tensor(trajectory) - torch.tensor(states.equilibrium)
+    train_y = torch.tensor(trajectory)# - torch.tensor(states.equilibrium)
 
     likelihood = MultitaskGaussianLikelihoodWithMissingObs(num_tasks=num_tasks, original_shape=train_y.shape)
-    model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix)
+    mean_module = Equilibrium_Mean(states.equilibrium, num_tasks)
+    model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module)
 
     manual_noise = torch.tensor(train_noise)
     _, mask = create_mask(train_y)
@@ -118,7 +120,7 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_
         #model.set_train_data(torch.tensor(trajectory_time), torch.tensor(trajectory) - torch.tensor(states.equilibrium), strict=False)
 
         #v2
-        train_y_masked, mask = create_mask(torch.tensor(trajectory) - torch.tensor(states.equilibrium))
+        train_y_masked, mask = create_mask(torch.tensor(trajectory))# - torch.tensor(states.equilibrium)
         model.mask = mask
         model.set_train_data(torch.tensor(trajectory_time), train_y_masked, strict=False)
         noise_strategy = MaskedManualNoise(mask, manual_noise)
@@ -138,7 +140,7 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_
         with torch.no_grad():
             reference_time = torch.linspace(step_time.start, step_time.end, step_time.count+1)
             outputs = model(reference_time)
-            reference = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=reference_time, mask=mask).mean.numpy() + states.equilibrium
+            reference = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=reference_time, mask=mask).mean.numpy()# + states.equilibrium
 
         x_lode[i*step_count:(i+1)*step_count+1] = reference
 
