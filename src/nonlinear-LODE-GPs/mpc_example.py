@@ -51,10 +51,10 @@ print("\n-----------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 
 
-optim_steps = 10
-pretrain_steps = 50
+optim_steps = 0
+pretrain_steps = 150
 
-reference_strategie =  3 # check create_reference() in mpc.py for details 
+reference_strategie =  7 # check create_reference() in mpc.py for details 
 
 
 dt_step = 0.1 # time step for simulation and gp model
@@ -86,7 +86,7 @@ states = State_Description(x_e, x_0, min=x_min, max=x_max)
 
 #likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
 
-control_time = Time_Def(0, t_end, step=dt_control )#* dt_step
+control_time = Time_Def(0, t_end, step=dt_control)#* dt_step
 model, mask = pretrain(system_matrix, num_tasks, control_time, pretrain_steps, reference_strategie, states)# pretrain the system and generate gp model. eventually not necessary
 
 x_sim, x_ref, x_lode = mpc_algorithm(system, model, states, t_end, dt_control, reference_strategie, optim_steps, dt_step=dt_step)
