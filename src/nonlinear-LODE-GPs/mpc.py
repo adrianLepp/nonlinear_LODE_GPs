@@ -69,9 +69,9 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
 
     #print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
 
-def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, reference_strategie:int, states:State_Description):
+def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, reference_strategie:dict, states:State_Description):
     
-    trajectory, trajectory_time, train_noise = create_reference(reference_strategie, time_obj, states)
+    trajectory, trajectory_time, train_noise = create_setpoints(reference_strategie, time_obj, states)
 
     train_x = torch.tensor(trajectory_time)
     train_y = torch.tensor(trajectory)# - torch.tensor(states.equilibrium)
@@ -94,7 +94,7 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
     return model, mask
 
 
-def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_end, dt_control, reference_strategy=1, optim_steps=10, dt_step = 0.1, plot_single_steps=False ):
+def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_end, dt_control, reference_strategy:dict, optim_steps=10, dt_step = 0.1, plot_single_steps=False ):
     # init time
     step_count = int(ceil(dt_control / dt_step))
     #dt_step =  dt_control /step_count
@@ -129,7 +129,7 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_
         step_time = Time_Def(t_i, t_i + dt_control , step=dt_step)
 
         # generate training Data
-        trajectory, trajectory_time, train_noise = create_reference(reference_strategy, control_time, states, x_i)
+        trajectory, trajectory_time, train_noise = create_setpoints(reference_strategy, control_time, states, x_i)
         manual_noise = torch.tensor(train_noise)
 
         # x_ref[i] = x_i
@@ -210,179 +210,41 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_
 
     return sim_data, train_data, lode_data
 
-def mpc_feed_forward(test_time:Time_Def, x_0, x_e, model:LODEGP, likelihood, system, SIM_ID:int, MODEL_ID:int, model_path, model_dir, optim_steps:int, train_x, train_y):
-    cnt = 0
-    while cnt < 1:
-        optimize_gp(model,optim_steps)
-        # create reference and control input
-        test_x = create_test_inputs(test_time.count, test_time.step, test_time.start, test_time.end, 1)
-        model.eval()
-        likelihood.eval()
-        with torch.no_grad():
-            #output = likelihood(model(test_x), train_data=model.train_inputs[0], current_data=test_x, mask=mask)
-            output = likelihood(model(test_x))
+def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_Description, x_0=None):
+    a = 1
 
-        train_data = Data_Def(train_x.numpy(), train_y.numpy() + x_e, system.state_dimension, system.control_dimension)
-        test_data = Data_Def(test_x.numpy(), output.mean.numpy() + x_e, system.state_dimension, system.control_dimension)
-
-        u_ref = test_data.y[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten()
-        ref_x, ref_y= simulate_system(system, x_0[0:system.state_dimension], test_time.start, test_time.end, test_time.count, u_ref, linear=False)
-        ref_data = Data_Def(ref_x.numpy(), ref_y.numpy(), system.state_dimension, system.control_dimension)
-
-        plot_results(train_data, test_data, ref_data)
-
-        # if SAVE:
-        #     save_results(model, equilibrium, x0, SIM_ID, MODEL_ID, CONFIG_FILE, system_name, config, model_path, train_data, test_data, train_time, test_time, ref_data=ref_data, linear=False) 
-        #     MODEL_ID += 1
-        #     SIM_ID += 1
-        #     model_path = f'{model_dir}/{str(MODEL_ID)}{name}.pth'
-
-        cnt += 1  
-        
-        lengthscale = model.covar_module.model_parameters.lengthscale_3
-        model.covar_module.model_parameters.lengthscale_3 = torch.nn.Parameter(lengthscale *0.9, requires_grad=False)
-
-        # signal_variance = model.covar_module.model_parameters.signal_variance_3
-        # model.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(signal_variance), requires_grad=False)
-
-def create_reference(strategy:int, time_obj:Time_Def, states:State_Description, x_0=None):
-    '''
-    strategy:
-    - 1: one start and one target point
-    - 2: smooth transition from start to target point
-    - 3: soft constraints at (max + min)/2 with variance (max - min)/2
-    - 4: one start point (not working)
-    '''
-    # TODO: noise is system specific and needs to given as parameter
-    start_noise = states.max * 1e-8
-    end_noise = start_noise * 1e4
-    #start_noise = [1e-8, 1e-8, 1e-8, 1e-10]
-    #end_noise = [1e-8, 1e-8, 1e-8, 1e-10]
-    constraint_points = 100
+    constraint_points = reference_strategy['constraints']
 
     if x_0 is not  None:
         states.init = x_0
 
-    if strategy == 1:
-        trajectory = [states.init, states.target]
-        trajectory_time = [time_obj.start, time_obj.end]
-        noise = np.concatenate([start_noise, end_noise], axis=0)
+    if reference_strategy['target'] is True:
+        a += 1
 
+    start_noise = (states.max-states.min) * reference_strategy['start_noise']
+    end_noise = (states.max-states.min) * reference_strategy['end_noise']
+
+    x_mean = (states.max + states.min) / 2
+    x_noise = ((states.max - states.min) / 4) #np.sqrt
+
+    end_time = time_obj.start + constraint_points * time_obj.step
+
+    if end_time > time_obj.end:
+        end_time = time_obj.end - time_obj.step
+        constraint_points = int((end_time - time_obj.start) / time_obj.step)
         
-    elif strategy == 2:
-        t_factor = 10
-        gain_factor = 10
 
-        trajectory = [states.init, states.init]
-        trajectory_time = [time_obj.start - t_factor*2, time_obj.start - t_factor]
-        noise = [1, 1]
-
-        for i in range(10):
-            trajectory_time.append(time_obj.start + i * t_factor)
-            trajectory.append(states.init + (states.target - states.init) * i / gain_factor)
-            #trajectory[i][system.state_dimension:] = [0.5 * system.param.u]
-            noise.append(1e5)
-
-        for i in range(5):
-            trajectory_time.append(time_obj.end + i * t_factor)
-            trajectory.append(states.target)
-            noise.append(1e4)
-
-    elif strategy == 3:
-        if states.max is None or states.min is None:
-            raise ValueError("Max and min values are required for reference strategy 3")
-        
-        x_mean = (states.max + states.min) / 2
-        x_noise = ((states.max - states.min) / 4) #np.sqrt
-
-        trajectory_time = np.linspace(time_obj.start, time_obj.end, time_obj.count+1).flatten()
-
-        trajectory = np.tile(x_mean, (time_obj.count+1, 1))
-        #trajectory[:, control_dim] = np.nan #FIXME
-        trajectory[0,:] = states.init
-        trajectory[-1,:] = states.target
-
-        # noise variant 1
-        # noise = np.ones((time_obj.count+1,)) * x_noise.mean()
-        # noise[0] = start_noise
-        # noise[-1] = end_noise
-
-        # noise variant 2
-        noise = np.tile(x_noise, (time_obj.count+1,))
-        noise[0:x_noise.shape[0]] = start_noise
-        noise[-x_noise.shape[0]::] = end_noise
-
-    elif strategy == 4:
-        trajectory = [states.init]
-        trajectory_time = [time_obj.start]
-
-        noise = start_noise
-    elif strategy == 5:
-        if states.max is None or states.min is None:
-            raise ValueError("Max and min values are required for reference strategy 3")
-        
-        x_mean = (states.max + states.min) / 2
-        x_noise = ((states.max - states.min) / 8) #np.sqrt
-
-        trajectory_time = np.linspace(time_obj.start, time_obj.end, time_obj.count+1).flatten()
-
-        trajectory = np.tile(x_mean, (time_obj.count+1, 1))
-        #trajectory[:, control_dim] = np.nan #FIXME
-        trajectory[0,:] = states.init
-        #trajectory[-1,:] = states.target
-
-        # noise variant 1
-        # noise = np.ones((time_obj.count+1,)) * x_noise.mean()
-        # noise[0] = start_noise
-        # noise[-1] = end_noise
-
-        # noise variant 2
-        noise = np.tile(x_noise, (time_obj.count+1,))
-        noise[0:x_noise.shape[0]] = start_noise
-        #noise[-x_noise.shape[0]::] = end_noise
-    elif strategy == 6:
-        if states.max is None or states.min is None:
-            raise ValueError("Max and min values are required for reference strategy 3")
-        
-        x_mean = (states.max + states.min) / 2
-        x_noise = ((states.max - states.min) / 8) #np.sqrt
-        end_time = time_obj.start + constraint_points * time_obj.step
-
-        trajectory_time = np.linspace(time_obj.start, end_time, constraint_points+1).flatten()
-
-        trajectory = np.tile(x_mean, (constraint_points+1, 1))
-        
-        trajectory[0,:] = states.init
-        
-        noise = np.tile(x_noise, (constraint_points+1,))
-        noise[0:x_noise.shape[0]] = start_noise
-    elif strategy == 7:
-        if states.max is None or states.min is None:
-            raise ValueError("Max and min values are required for reference strategy 7")
-        
-        x_mean = (states.max + states.min) / 2
-        x_noise = ((states.max - states.min) / 4) #np.sqrt
-        end_time = time_obj.start + constraint_points * time_obj.step
-
-        if end_time > time_obj.end:
-            end_time = time_obj.end - time_obj.step
-            constraint_points = int((end_time - time_obj.start) / time_obj.step)
-            #print(f"constraint points: {constraint_points}")
-
-        trajectory_time = np.linspace(time_obj.start, end_time, constraint_points+2).flatten()
-        trajectory_time[-1] = time_obj.end
-
-        trajectory = np.tile(x_mean, (constraint_points+2, 1))
-        
-        trajectory[0,:] = states.init
-        trajectory[-1,:] = states.target
-        
-        noise = np.tile(x_noise, (constraint_points+2,))
-        noise[0:x_noise.shape[0]] = start_noise
-        noise[-x_noise.shape[0]::] = end_noise
-
-    else:
-        raise ValueError(f"strategy {str(strategy)} not supported")
+    trajectory_time = np.linspace(time_obj.start, end_time, constraint_points+a).flatten()
+    trajectory = np.tile(x_mean, (constraint_points+a, 1))
+    noise = np.tile(x_noise, (constraint_points+a,))
     
-    ## end_noise = start_noise * exp((log(1/start_noise))/(t_end-dt_control)*t_i)
+    trajectory[0,:] = states.init
+    noise[0:x_noise.shape[0]] = start_noise
+    
+
+    if reference_strategy['target'] is True:
+        trajectory_time[-1] = time_obj.end
+        trajectory[-1,:] = states.target
+        noise[-x_noise.shape[0]::] = end_noise
+
     return trajectory, trajectory_time, noise

@@ -10,7 +10,7 @@ import torch
 from helpers import *
 from likelihoods import *
 from masking import *
-from mpc import mpc_algorithm, mpc_feed_forward, create_reference, pretrain
+from mpc import mpc_algorithm, pretrain
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
@@ -54,7 +54,12 @@ print("\n-----------------------------------------------------------------------
 optim_steps = 0
 pretrain_steps = 150
 
-reference_strategie =  7 # check create_reference() in mpc.py for details 
+reference_strategie = {
+    'target': True,
+    'constraints' : 10,
+    'start_noise' : 1e-8,
+    'end_noise' : 1e-7,
+}
 
 
 dt_step = 0.1 # time step for simulation and gp model
@@ -73,7 +78,6 @@ num_tasks = system.dimension
 _ , x0 = system.get_ODEmatrix(u_1)
 x_0 = np.array(x0)
 
-#x_0 = np.array([0,0,0,0])
 
 system_matrix , equilibrium = system.get_ODEmatrix(u_2)
 x_e = np.array(equilibrium)
@@ -81,6 +85,8 @@ x_e = np.array(equilibrium)
 # soft constraints for states
 x_min = np.array(system.x_min)
 x_max = np.array(system.x_max)
+
+x_min[2] = x_e[2]
 
 states = State_Description(x_e, x_0, min=x_min, max=x_max)
 
