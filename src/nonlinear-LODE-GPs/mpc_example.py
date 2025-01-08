@@ -97,13 +97,13 @@ system = load_system(system_name)
 num_tasks = system.dimension
 
 _ , x0 = system.get_ODEmatrix(u_1)
-x_0 = np.array(x0)
+x_0 = torch.tensor(x0)
 system_matrix , equilibrium = system.get_ODEmatrix(u_2)
-x_e = np.array(equilibrium)
+x_e = torch.tensor(equilibrium)
 
 # soft constraints for states
-x_min = np.array([system.x_min[0],system.x_min[1], x_e[2]])
-x_max = np.array(system.x_max)
+x_min = torch.tensor([system.x_min[0],system.x_min[1], x_e[2]])
+x_max = torch.tensor(system.x_max)
 
 #x_min[2] = x_e[2]
 states = State_Description(x_e, x_0, min=x_min, max=x_max)

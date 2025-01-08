@@ -156,7 +156,7 @@ class Time_Def():
     end:float
     count:int
     step:float
-    
+
     def __init__(self, start, end, count=None, step=None):
         self.start = start
         self.end = end
@@ -171,13 +171,13 @@ class Time_Def():
         
 
 class State_Description():
-    equilibrium:np.ndarray
-    init:np.ndarray
-    target:np.ndarray
-    min:np.ndarray
-    max:np.ndarray
+    equilibrium:torch.Tensor
+    init:torch.Tensor
+    target:torch.Tensor
+    min:torch.Tensor
+    max:torch.Tensor
 
-    def __init__(self, equilibrium:np.ndarray, init:np.ndarray, target:np.ndarray=None,  min:np.ndarray=None, max:np.ndarray=None):
+    def __init__(self, equilibrium:torch.Tensor, init:torch.Tensor, target:torch.Tensor=None,  min:torch.Tensor=None, max:torch.Tensor=None):
         self.equilibrium = equilibrium
         self.init = init
 

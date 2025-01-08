@@ -75,10 +75,7 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
 
 def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, reference_strategie:dict, states:State_Description, hyperparameters:dict=None):
     
-    trajectory, t_trajectory, train_noise = create_setpoints(reference_strategie, time_obj, states)
-
-    train_x = torch.tensor(t_trajectory)
-    train_y = torch.tensor(trajectory)# - torch.tensor(states.equilibrium)
+    train_y, train_x, manual_noise = create_setpoints(reference_strategie, time_obj, states)
 
     #noise_constraint = gpytorch.constraints.Interval([1e-9,1e-9,1e-13],[1e-7,1e-7,1e-11])
     likelihood = MultitaskGaussianLikelihoodWithMissingObs(
@@ -89,7 +86,6 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
     mean_module = Equilibrium_Mean(states.equilibrium, num_tasks)
     model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module)
 
-    manual_noise = torch.tensor(train_noise)
     _, mask = create_mask(train_y)
     noise_strat = MaskedManualNoise(mask, manual_noise)
     model.likelihood.set_noise_strategy(noise_strat)
@@ -121,11 +117,7 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
 def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, reference_strategy:dict, control_time:Time_Def, sim_time:Time_Def, optim_steps=10, plot_single_steps=False ):
     # init time
     step_count = int(ceil(control_time.step / sim_time.step))
-    #dt_step =  dt_control /step_count
-    #control_count = int(control_time.end / control_time.step)
     
-
-    #factor = 1.5
     gp_steps =   int(control_time.count * step_count + 1)
     sim_steps = int(sim_time.count + 1)
 
@@ -141,8 +133,6 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
     x_lode = np.zeros((gp_steps, system.dimension))
     x_lode[0] = states.init
 
-    # x_ref = np.zeros((control_count + 1, system.dimension))
-    # t_setpoint = np.zeros(control_count + 1)
     num_tasks = system.dimension
 
     x_ref = np.array([states.init, states.target])
@@ -157,8 +147,7 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
         step_time = Time_Def(t_i, t_i + control_time.step , step=sim_time.step)
 
         # generate training Data
-        trajectory, t_trajectory, train_noise = create_setpoints(reference_strategy, ref_time, states, x_i)
-        manual_noise = torch.tensor(train_noise)
+        trajectory, t_trajectory, manual_noise = create_setpoints(reference_strategy, ref_time, states, torch.tensor(x_i))
 
         # x_ref[i] = x_i
         # t_setpoint[i] = t_i
@@ -170,52 +159,37 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
         #model.set_train_data(torch.tensor(t_trajectory), torch.tensor(trajectory) - torch.tensor(states.equilibrium), strict=False)
 
         #v2
-        train_y_masked, mask = create_mask(torch.tensor(trajectory))# - torch.tensor(states.equilibrium)
+        train_y_masked, mask = create_mask(trajectory)
         model.mask = mask
-        model.set_train_data(torch.tensor(t_trajectory), train_y_masked, strict=False)
+        model.set_train_data(t_trajectory, train_y_masked, strict=False)
         noise_strategy = MaskedManualNoise(mask, manual_noise)
         model.likelihood.set_noise_strategy(noise_strategy)
 
-        optimize_mpc_gp(model,torch.tensor(t_trajectory), mask_stacked=torch.ones((torch.tensor(t_trajectory).shape[0], num_tasks)).bool(), training_iterations=optim_steps, verbose=False)
+        optimize_mpc_gp(model,t_trajectory, mask_stacked=torch.ones((t_trajectory.shape[0], num_tasks)).bool(), training_iterations=optim_steps, verbose=False)
 
         #print(f'Iter {i}, time: {t_i}')
+
         # prediction
         
         #model.likelihood.eval()
         t_setpoint = torch.linspace(step_time.start, step_time.end, step_time.count+1)
         setpoint = inference_mpc_gp(model, t_setpoint, mask).numpy()
-         
-        # outputs = model(t_setpoint)
-        # setpoint = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=t_setpoint, mask=mask).mean.numpy()# + states.equilibrium
 
         x_lode[i*step_count+1:(i+1)*step_count+1] = setpoint[1::]
 
         u_ref = setpoint[:,system.state_dimension:system.state_dimension+system.control_dimension]#.flatten()
-        #u_ref = x_lode[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten()
 
         # simulate system
-        #u_sim[i*step_count+1:(i+1)*step_count+1] = u_ref[0:-1]
         u_sim[i*step_count+1:(i+1)*step_count+1] = u_ref[1::]
-
-
-        #t_step , x_sim_step= simulate_system(system, x_i[0:system.state_dimension], step_time.start, step_time.end, step_time.count, u_ref , linear=False)
         sol = solve_ivp(system.stateTransition, [step_time.start, step_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=t_setpoint.numpy(), args=(u_sim, step_time.step ))#, max_step=dt ,  atol = 1, rtol = 1
         x_sim_current = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
-
-
-        #x_sim[i*step_count+1:(i+1)*step_count+1] = x_sim_step.numpy()
         x_sim[i*step_count+1:(i+1)*step_count+1] =    x_sim_current
 
         if plot_single_steps:
-            train_data = Data_Def(t_trajectory, trajectory, system.state_dimension, system.control_dimension)
+            train_data = Data_Def(t_trajectory.numpy(), trajectory.numpy(), system.state_dimension, system.control_dimension)
             test_data = Data_Def(t_setpoint.numpy(), setpoint, system.state_dimension, system.control_dimension)
             sim_data = Data_Def(t_setpoint.numpy(), x_sim_current, system.state_dimension, system.control_dimension)
             plot_results(train_data, test_data, sim_data)# 
-
-    
-    
-    # x_ref[-1] = states.target
-    # t_setpoint[-1] = t_end
 
     u_sim[(i+1)*step_count+1::] = states.equilibrium[system.state_dimension::]
     x_i = x_sim[(i+1)*step_count]
@@ -256,9 +230,9 @@ def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_De
         constraint_points = int((end_time - time_obj.start) / time_obj.step)
         
 
-    t_trajectory = np.linspace(time_obj.start, end_time + time_obj.step* (a-1) , constraint_points+a).flatten()
-    trajectory = np.tile(x_mean, (constraint_points+a, 1))
-    noise = np.tile(x_noise, (constraint_points+a,))
+    t_trajectory = torch.linspace(time_obj.start, end_time + time_obj.step* (a-1) , constraint_points+a).flatten()
+    trajectory = torch.tile(x_mean, (constraint_points+a, 1))
+    noise = torch.tile(x_noise, (constraint_points+a,))
     
     trajectory[0,:] = states.init
     noise[0:x_noise.shape[0]] = start_noise
