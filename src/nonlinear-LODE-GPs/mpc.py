@@ -34,7 +34,11 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
     gp.train()
     gp.likelihood.train()
 
-    optimizer = torch.optim.Adam(gp.parameters(), lr=0.1) 
+    optimizer = torch.optim.Adam(
+        #params=list(set(gp.parameters()) - {gp.mean_module.parameters(),gp.likelihood.parameters(),  }),
+        gp.parameters(), 
+        lr=0.1
+    ) 
 
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(gp.likelihood, gp)
     for i in range(training_iterations):
@@ -49,7 +53,7 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
 
         # enforce constraints (heuristics)
         #FIXME: system specific
-        # gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_2))
+        gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_2))
         # max_signal_variance = 1
         # if gp.covar_module.model_parameters.signal_variance_2 > max_signal_variance:
         #     gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(torch.tensor(max_signal_variance))
@@ -69,15 +73,19 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
 
     #print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
 
-def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, reference_strategie:dict, states:State_Description):
+def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, reference_strategie:dict, states:State_Description, hyperparameters:dict=None):
     
     trajectory, trajectory_time, train_noise = create_setpoints(reference_strategie, time_obj, states)
 
     train_x = torch.tensor(trajectory_time)
     train_y = torch.tensor(trajectory)# - torch.tensor(states.equilibrium)
 
-    noise_constraint = gpytorch.constraints.Interval([1e-9,1e-9,1e-13],[1e-7,1e-7,1e-11])  #TODO
-    likelihood = MultitaskGaussianLikelihoodWithMissingObs(num_tasks=num_tasks, original_shape=train_y.shape, noise_constraint=noise_constraint) #, has_task_noise=False
+    #noise_constraint = gpytorch.constraints.Interval([1e-9,1e-9,1e-13],[1e-7,1e-7,1e-11])  #TODO
+    likelihood = MultitaskGaussianLikelihoodWithMissingObs(
+        num_tasks=num_tasks, 
+        original_shape=train_y.shape, 
+        #noise_constraint=noise_constraint
+        ) #, has_task_noise=False
     mean_module = Equilibrium_Mean(states.equilibrium, num_tasks)
     model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module)
 
@@ -89,7 +97,28 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
     model.mask = mask
     model.equilibrium = states.equilibrium
 
+    # hyperparameter constraints
+    if hyperparameters is not None:
+        for key, value in hyperparameters.items():
+            if hasattr(model.covar_module.model_parameters, key):
+                setattr(model.covar_module.model_parameters, key, torch.nn.Parameter(torch.tensor(value), requires_grad=False))
+            else:
+                print(f'Hyperparameter {key} not found in model')
+
+    #model.covar_module.model_parameters.lengthscale_2 = torch.nn.Parameter(torch.tensor(3.4), requires_grad=False)
+
+    #model.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(torch.tensor(7), requires_grad=False)
+    #model.covar_module.model_parameters.lengthscale_2 = torch.nn.Parameter(torch.tensor(3.4), requires_grad=False)
+
     optimize_mpc_gp(model, train_x, mask_stacked=torch.ones((train_x.shape[0], num_tasks)).bool(), training_iterations=optim_steps)
+
+    print("\n----------------------------------------------------------------------------------\n")
+    print('Trained model parameters:')
+    named_parameters = list(model.named_parameters())
+    for j in range(len(named_parameters)):
+        print(named_parameters[j][0], named_parameters[j][1].data) #.item()
+    print("\n----------------------------------------------------------------------------------\n")
+
 
     return model, mask
 
@@ -151,11 +180,6 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description,  t_
         optimize_mpc_gp(model,torch.tensor(trajectory_time), mask_stacked=torch.ones((torch.tensor(trajectory_time).shape[0], num_tasks)).bool(), training_iterations=optim_steps, verbose=False)
 
         #print(f'Iter {i}, time: {t_i}')
-        # named_parameters = list(model.named_parameters())
-        # for j in range(len(named_parameters)):
-        #     print(named_parameters[j][0], named_parameters[j][1].data) #.item()
-
-
         # prediction
         
         #model.likelihood.eval()

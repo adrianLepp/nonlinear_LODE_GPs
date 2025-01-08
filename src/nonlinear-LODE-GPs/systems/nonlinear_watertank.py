@@ -27,7 +27,7 @@ class Nonlinear_Watertank(ODE_System):
     
     x_min = [0, 0, 0]
     #x_max = [1, 1, 2e-4]
-    x_max = [0.6, 0.4, 2e-4]
+    x_max = [0.6, 0.6, 2e-4]
     
     def __init__(self):
         super().__init__(2,1)
