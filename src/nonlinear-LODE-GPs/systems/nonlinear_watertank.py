@@ -26,7 +26,7 @@ class Parameter():
 class Nonlinear_Watertank(ODE_System):
     
     x_min = [0, 0, 0]
-    #x_max = [1, 1, 2e-4]
+    #x_max = [0.6, 0.6, 2]
     x_max = [0.6, 0.6, 2e-4]
     
     def __init__(self):
@@ -99,15 +99,6 @@ class Nonlinear_Watertank(ODE_System):
         dx1 = 1/self.param.A*(self.param.c12*sign(x[0]-x[1])*sqrt(2*self.param.g*abs(x[0]-x[1]))-self.param.c2R*sqrt(2*self.param.g*abs(x[1])))
         #
         #dx3 = 0
-
-        return [dx0, dx1]#, dx3
-    
-    def linear_stateTransition(self, t, x, u, dt):
-
-        control_idx = floor(abs(t/dt-0.000000001))
-
-        dx0 = self.A_r[0][0] * x[0] + self.A_r[0][1] * x[1]  + self.b_r[0][0] * u[control_idx]
-        dx1 = self.A_r[1][0] * x[0] + self.A_r[1][1] * x[1]  + self.b_r[1][0] * u[control_idx]
 
         return [dx0, dx1]#, dx3
         

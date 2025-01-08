@@ -112,7 +112,7 @@ class MultitaskGaussianLikelihoodWithMissingObs(MultitaskGaussianLikelihood):
 
     def __init__(self, num_tasks=None, noise_constraint=None, has_task_noise=True, original_shape=None):
         # Call super properly
-        super().__init__(num_tasks=num_tasks, noise_constraint=noise_constraint, has_task_noise=has_task_noise)# FIXME , has_global_noise=False
+        super().__init__(num_tasks=num_tasks, noise_constraint=noise_constraint, has_task_noise=has_task_noise)# FIXME  , has_global_noise=False
         if original_shape is None:
             self.original_shape = None
         else:
@@ -218,7 +218,7 @@ class MultitaskGaussianLikelihoodWithMissingObs(MultitaskGaussianLikelihood):
                     # This is about getting the manual noise
                     noise_matrix = super()._shaped_noise_covar(self.original_shape, add_noise=self.has_global_noise)
                     result_noise = self.noise_strategy(noise=self.noise, task_noises=self.task_noises, noise_matrix=noise_matrix, eval_mode=True)
-                    #result_noise = self.noise_strategy(task_noises=self.task_noises, noise_matrix=noise_matrix, eval_mode=True) FIXME
+                    #result_noise = self.noise_strategy(task_noises=self.task_noises, noise_matrix=noise_matrix, eval_mode=True) #FIXME
                     result_noise = torch.diag(result_noise.diag() * (~mask))
                     # Sum the noise value lists to be one big tensor containing only 1s and 0s
                     # Multiply with the diagonal to filter, where the noise is not necessary there should be 0

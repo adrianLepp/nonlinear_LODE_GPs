@@ -152,6 +152,11 @@ def equilibrium_base_change(time, states, equilibriums, changepoints, add=True):
     return states
 
 class Time_Def():
+    start:float
+    end:float
+    count:int
+    step:float
+    
     def __init__(self, start, end, count=None, step=None):
         self.start = start
         self.end = end
