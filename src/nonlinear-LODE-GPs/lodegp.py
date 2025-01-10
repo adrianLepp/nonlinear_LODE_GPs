@@ -7,6 +7,9 @@ from kernels import *
 import pprint
 import time
 import torch
+from masking import masking, create_mask
+from likelihoods import MultitaskGaussianLikelihoodWithMissingObs
+from noise_models import MaskedNoise
 
 def optimize_gp(gp, training_iterations=100, verbose=True):
     # Find optimal model hyperparameters
@@ -125,8 +128,13 @@ class LODEGP_Deprecated(gpytorch.models.ExactGP):
 
 
 class LODEGP(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, num_tasks, A, mean_module:gpytorch.means.Mean=None):
+    def __init__(self, train_x:torch.Tensor, train_y:torch.Tensor, likelihood:gpytorch.likelihoods.Likelihood, num_tasks:int, A, mean_module:gpytorch.means.Mean=None):
+        self.contains_nan = any(train_y.isnan().flatten())
+        if self.contains_nan:
+            train_y, self.mask = create_mask(train_y)
+
         super(LODEGP, self).__init__(train_x, train_y, likelihood)
+
         if mean_module is None:
             self.mean_module = gpytorch.means.MultitaskMean(
                 gpytorch.means.ZeroMean(), num_tasks=num_tasks
@@ -149,7 +157,14 @@ class LODEGP(gpytorch.models.ExactGP):
             self.common_terms["t_sum"] = X+X.t()
         mean_x = self.mean_module(X)
         covar_x = self.covar_module(X, common_terms=self.common_terms)
-        return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x) 
+
+        if self.contains_nan:   
+            mean_x, covar_x = masking(base_mask=self.mask, mean=mean_x, covar=covar_x, fill_zeros=True)
+            return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)   
+        else:   
+            return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)   
+
+        #return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x) 
     
 
 class Param_LODEGP(gpytorch.models.ExactGP):

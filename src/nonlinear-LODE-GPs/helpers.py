@@ -270,3 +270,36 @@ def save_results(
     with open(config_file,"w") as f:
         config['simulation_id'] = sim_id
         json.dump(config, f)
+
+
+def stack_tensor(tensor, num_tasks, dim=-1, batch_dim=0):
+    indices = torch.tensor([i for i in range(0, tensor.shape[-1], num_tasks)])
+    zer = int(0)
+    ind0 = indices
+    ind1 = indices + int(1)
+    ind2 = indices + int(2)
+    ind3 = indices + int(3)
+    ind4 = indices + int(4)
+    # rest_dims = [i for i in range(tensor.ndim + 1) if i != batch_dim]
+    if num_tasks == 5:
+        return torch.stack((torch.index_select(tensor, dim, ind0),
+                            torch.index_select(tensor, dim, ind1),
+                            torch.index_select(tensor, dim, ind2),
+                            torch.index_select(tensor, dim, ind3),
+                            torch.index_select(tensor, dim, ind4)), dim=-1)
+    elif num_tasks == 1:
+        return ind0
+    elif num_tasks == 2:
+        return torch.stack((torch.index_select(tensor, dim, ind0),
+                            torch.index_select(tensor, dim, ind1)), dim=-1)
+    elif num_tasks == 3:
+        return torch.stack((torch.index_select(tensor, dim, ind0),
+                            torch.index_select(tensor, dim, ind1),
+                            torch.index_select(tensor, dim, ind2)), dim=-1)
+    
+
+def stack_plot_tensors(mean,  num_tasks):#lower, upper,
+    mean = stack_tensor(mean, num_tasks)
+    # lower = stack_tensor(lower, num_tasks)
+    # upper = stack_tensor(upper, num_tasks)
+    return mean #lower, upper

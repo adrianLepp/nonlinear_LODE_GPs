@@ -22,6 +22,7 @@ def update_gp(model:LODEGP, train_x, train_y, noise, mask):
 
 def inference_mpc_gp(model:LODEGP, test_x, mask):
     model.eval()
+    
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         outputs = model(test_x)
         predictions = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=test_x, mask=mask)
@@ -173,7 +174,14 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
         
         #model.likelihood.eval()
         t_setpoint = torch.linspace(step_time.start, step_time.end, step_time.count+1)
-        setpoint = inference_mpc_gp(model, t_setpoint, mask).numpy()
+        
+        
+        _setpoint = inference_mpc_gp(model, t_setpoint, mask)
+        if any(mask) is True:
+            setpoint = stack_plot_tensors(_setpoint, num_tasks).numpy()
+        else:
+            setpoint = _setpoint.numpy()
+        
 
         x_lode[i*step_count+1:(i+1)*step_count+1] = setpoint[1::]
 
@@ -185,10 +193,13 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
         x_sim_current = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
         x_sim[i*step_count+1:(i+1)*step_count+1] =    x_sim_current
 
-        if plot_single_steps:
+        if plot_single_steps and t_i > 1000:
+            t_setpoint_2 = torch.linspace(step_time.start, control_time.end, control_time.count +1)
+            setpoint_2 = inference_mpc_gp(model, t_setpoint_2, mask).numpy()
+
             train_data = Data_Def(t_trajectory.numpy(), trajectory.numpy(), system.state_dimension, system.control_dimension)
-            test_data = Data_Def(t_setpoint.numpy(), setpoint, system.state_dimension, system.control_dimension)
-            sim_data = Data_Def(t_setpoint.numpy(), x_sim_current, system.state_dimension, system.control_dimension)
+            test_data = Data_Def(t_setpoint_2.numpy(), setpoint_2, system.state_dimension, system.control_dimension)
+            sim_data = Data_Def(t_setpoint.numpy()[1::], x_sim_current, system.state_dimension, system.control_dimension)
             plot_results(train_data, test_data, sim_data)# 
 
     u_sim[(i+1)*step_count+1::] = states.equilibrium[system.state_dimension::]
@@ -217,11 +228,13 @@ def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_De
     if reference_strategy['target'] is True:
         a += 1
 
-    start_noise = (states.max-states.min) * reference_strategy['start_noise']
-    end_noise = (states.max-states.min) * reference_strategy['end_noise']
+    # init_noise = (states.max-states.min) * reference_strategy['init_noise']
+    # target_noise = (states.max-states.min) * reference_strategy['target_noise']
+    init_noise = torch.tensor(reference_strategy['init_noise'])
+    target_noise = torch.tensor(reference_strategy['target_noise'])
 
     x_mean = (states.max + states.min) / 2
-    x_noise = ((states.max - states.min) / 8) #np.sqrt
+    x_noise = ((states.max - states.min) / 4) #np.sqrt
 
     end_time = time_obj.start + constraint_points * time_obj.step
 
@@ -235,13 +248,20 @@ def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_De
     noise = torch.tile(x_noise, (constraint_points+a,))
     
     trajectory[0,:] = states.init
-    noise[0:x_noise.shape[0]] = start_noise
+    #trajectory[0,2] = torch.nan
+
+    noise[0:x_noise.shape[0]] = init_noise
     
 
     if reference_strategy['target'] is True:
         t_trajectory[-1] = time_obj.end
         trajectory[-1,:] = states.target
-        noise[-x_noise.shape[0]::] = end_noise
+        #trajectory[-1,2] = torch.nan
+        #noise[-x_noise.shape[0]::] = target_noise
+
+        noise[-x_noise.shape[0]::] = target_noise
+        #noise[-1] = x_noise[2] / 4
+        #noise[2] = x_noise[2] / 8
 
         # trajectory[-1,2] = x_mean[2]
         # noise[-1] = x_noise[2]
