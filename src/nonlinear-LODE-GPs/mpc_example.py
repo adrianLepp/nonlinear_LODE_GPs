@@ -51,16 +51,18 @@ except:
 print("\n----------------------------------------------------------------------------------\n")
 
 
-init_noise = [1e-8, 1e-8, 1e-8]
-target_noise = [1e-7, 1e-7, 1e-11]
+init_noise = [1e-8, 1e-8, 1e-12]
+target_noise = [1e-8, 1e-8, 1e-12]#[1e-7, 1e-7, 1e-11]
 
 
 # Reference
 reference_strategie = {
-    'target': False,
+    'target': True,
     'constraints' : 10,
+    'past-values' : 0,
     'init_noise' : init_noise,
     'target_noise' : target_noise,
+    'soft_constraints' : 'equilibrium' # 'state_limit' or 'equilibrium'
 }
 
 # Equilibrium values for the system
@@ -68,7 +70,7 @@ u_1 = 0.2   # control input to find equilibrium where we start
 u_2 = 0.3 # control input to find equilibrium where we want to end and linearize around
 
 # TIME
-t = 400
+t = 100
 
 control_time = Time_Def(
     0, 
@@ -78,13 +80,13 @@ control_time = Time_Def(
 
 sim_time = Time_Def(
     0, 
-    t + 1, 
+    t + 100 , 
     step=0.1
 )
 
 # GP settings
 optim_steps = 0
-pretrain_steps = 100
+pretrain_steps = 200
 hyperparameters = {
     #'lengthscale_2': 3
 }
@@ -101,11 +103,13 @@ x_e = torch.tensor(equilibrium)
 # soft constraints for states
 #x_min = torch.tensor([system.x_min[0],system.x_min[1], x_e[2]])
 
-x_min = torch.tensor(system.x_min)
-x_max = torch.tensor(system.x_max)
-constraint_factor = 1.1
-x_min = torch.tensor(x_e / constraint_factor)
-x_max = torch.tensor(x_e * constraint_factor)
+if reference_strategie['soft_constraints'] == 'state_limit':
+    x_min = torch.tensor(system.x_min)
+    x_max = torch.tensor(system.x_max)
+elif reference_strategie['soft_constraints'] == 'equilibrium':
+    #constraint_factor = 1.1
+    x_min = torch.tensor(x_e * 0.9)
+    x_max = torch.tensor(x_e * 1.1)
 
 #x_min[2] = x_e[2]
 states = State_Description(x_e, x_0, min=x_min, max=x_max)
@@ -135,12 +139,12 @@ def constr_viol(mean, ub, lb, indx=None):
 
 constraint_viol = constr_viol(
     torch.tensor(sim_data.y), 
-    torch.tensor(x_max).reshape(1, -1), 
-    torch.tensor(x_min).reshape(1, -1)
+    x_max.clone().detach().reshape(1, -1), 
+    x_min.clone().detach().reshape(1, -1)
 )
 control_err = mse_mean(
     torch.tensor(sim_data.y[:,0:system.control_dimension]),
-    torch.tile(torch.tensor(states.target[0:system.control_dimension]), (sim_time.count+1, 1))
+    torch.tile(states.target[0:system.control_dimension].clone().detach(), (sim_time.count+1, 1))
     #torch.zeros_like(torch.tensor(lode_data))
 )
 
@@ -168,4 +172,7 @@ if SAVE:
     add_simulation_data(SIM_ID, lode_data.time, lode_data.y)
 
     add_reference_data(SIM_ID, 'nonlinear', sim_data.time, sim_data.y)
+
+    print(f"save model with model id {MODEL_ID}")
+    print(f"save data with data id {SIM_ID}")
 

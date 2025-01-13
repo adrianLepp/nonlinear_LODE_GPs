@@ -17,15 +17,26 @@ from likelihoods import *
 from masking import *
 from mean_modules import Equilibrium_Mean
 
-def update_gp(model:LODEGP, train_x, train_y, noise, mask):
-    return
+def update_gp(model:LODEGP, train_x:torch.Tensor, train_y:torch.Tensor, manual_noise:torch.Tensor, optim_steps:int=0):
+    # v1
+    #model.likelihood.set_noise(torch.tensor(train_noise))
+    #model.set_train_data(torch.tensor(t_setpoint), torch.tensor(setpoint) - torch.tensor(states.equilibrium), strict=False)
 
-def inference_mpc_gp(model:LODEGP, test_x, mask):
+    #v2
+    train_y_masked, mask = create_mask(train_y)
+    model.mask = mask
+    model.set_train_data(train_x, train_y_masked, strict=False)
+    noise_strategy = MaskedManualNoise(mask, manual_noise)
+    model.likelihood.set_noise_strategy(noise_strategy)
+
+    optimize_mpc_gp(model,train_x, mask_stacked=torch.ones((train_x.shape[0], model.num_tasks)).bool(), training_iterations=optim_steps, verbose=False)
+
+def inference_mpc_gp(model:LODEGP, test_x:torch.Tensor):
     model.eval()
     
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         outputs = model(test_x)
-        predictions = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=test_x, mask=mask)
+        predictions = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=test_x, mask=model.mask)
         mean = predictions.mean
         lower, upper = predictions.confidence_region()
 
@@ -115,7 +126,29 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
     return model, mask
 
 
+def predict_reference(model:LODEGP, step_time:Time_Def, states:State_Description, x_i:np.ndarray, t_i:float, convergence:bool, EARLY_CONVERGENCE:bool=False):
+    t_reference = torch.linspace(step_time.start, step_time.end, step_time.count+1)
+
+    if EARLY_CONVERGENCE and np.isclose(x_i, states.target, rtol=1e-3).all(): #, atol=1e-3
+        if convergence is False:
+            convergence = True
+            print(f'Target reached at time {t_i}')
+
+        reference = np.tile(states.target, (step_time.count+1, 1))
+    
+    else:
+        _reference = inference_mpc_gp(model, t_reference)
+        if any(model.mask) is True:
+            reference = stack_plot_tensors(_reference, model.num_tasks).numpy()
+        else:
+            reference = _reference.numpy()
+    
+    return t_reference, reference, convergence
+        
+
 def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, reference_strategy:dict, control_time:Time_Def, sim_time:Time_Def, optim_steps=10, plot_single_steps=False ):
+    convergence  = False
+    EARLY_CONVERGENCE = True
     # init time
     step_count = int(ceil(control_time.step / sim_time.step))
     
@@ -146,79 +179,53 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
         x_i = x_sim[i*step_count]
         ref_time = Time_Def(t_i, control_time.end, step=control_time.step)#* dt_step TODO: dt_step
         step_time = Time_Def(t_i, t_i + control_time.step , step=sim_time.step)
-
-        # generate training Data
-        trajectory, t_trajectory, manual_noise = create_setpoints(reference_strategy, ref_time, states, torch.tensor(x_i))
-
-        # x_ref[i] = x_i
-        # t_setpoint[i] = t_i
-
-        # train gp model
-
-        # v1
-        #model.likelihood.set_noise(torch.tensor(train_noise))
-        #model.set_train_data(torch.tensor(t_trajectory), torch.tensor(trajectory) - torch.tensor(states.equilibrium), strict=False)
-
-        #v2
-        train_y_masked, mask = create_mask(trajectory)
-        model.mask = mask
-        model.set_train_data(t_trajectory, train_y_masked, strict=False)
-        noise_strategy = MaskedManualNoise(mask, manual_noise)
-        model.likelihood.set_noise_strategy(noise_strategy)
-
-        optimize_mpc_gp(model,t_trajectory, mask_stacked=torch.ones((t_trajectory.shape[0], num_tasks)).bool(), training_iterations=optim_steps, verbose=False)
-
         #print(f'Iter {i}, time: {t_i}')
 
-        # prediction
-        
-        #model.likelihood.eval()
-        t_setpoint = torch.linspace(step_time.start, step_time.end, step_time.count+1)
-        
-        
-        _setpoint = inference_mpc_gp(model, t_setpoint, mask)
-        if any(mask) is True:
-            setpoint = stack_plot_tensors(_setpoint, num_tasks).numpy()
-        else:
-            setpoint = _setpoint.numpy()
+        t_past = torch.linspace(t_i - reference_strategy['past-values'] * control_time.step, t_i-control_time.step, reference_strategy['past-values'])
+        t_past = t_past[t_past >= 0]
+        past = torch.tensor(np.array([x_sim[np.where(t_sim == t)].flatten() for t in t_past]))
         
 
-        x_lode[i*step_count+1:(i+1)*step_count+1] = setpoint[1::]
-
-        u_ref = setpoint[:,system.state_dimension:system.state_dimension+system.control_dimension]#.flatten()
+        setpoint, t_setpoint, manual_noise = create_setpoints(reference_strategy, ref_time, states, torch.tensor(x_i), t_past, past)
+        update_gp(model, t_setpoint, setpoint, manual_noise, optim_steps)
+        t_reference, reference,  convergence = predict_reference(model, step_time, states, x_i, t_i, convergence, EARLY_CONVERGENCE)
+        
+        x_lode[i*step_count+1:(i+1)*step_count+1] = reference[1::]
+        u_ref = reference[:,system.state_dimension:system.state_dimension+system.control_dimension]#.flatten()
 
         # simulate system
         u_sim[i*step_count+1:(i+1)*step_count+1] = u_ref[1::]
-        sol = solve_ivp(system.stateTransition, [step_time.start, step_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=t_setpoint.numpy(), args=(u_sim, step_time.step ))#, max_step=dt ,  atol = 1, rtol = 1
+        sol = solve_ivp(system.stateTransition, [step_time.start, step_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=t_reference.numpy(), args=(u_sim, step_time.step ), max_step=step_time.step)#, max_step=dt ,  atol = 1, rtol = 1
         x_sim_current = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
         x_sim[i*step_count+1:(i+1)*step_count+1] =    x_sim_current
 
         if plot_single_steps and t_i > 1000:
-            t_setpoint_2 = torch.linspace(step_time.start, control_time.end, control_time.count +1)
-            setpoint_2 = inference_mpc_gp(model, t_setpoint_2, mask).numpy()
+            t_reference_2 = torch.linspace(step_time.start, control_time.end, control_time.count +1)
+            reference_2 = inference_mpc_gp(model, t_reference_2, model.mask).numpy()
 
-            train_data = Data_Def(t_trajectory.numpy(), trajectory.numpy(), system.state_dimension, system.control_dimension)
-            test_data = Data_Def(t_setpoint_2.numpy(), setpoint_2, system.state_dimension, system.control_dimension)
-            sim_data = Data_Def(t_setpoint.numpy()[1::], x_sim_current, system.state_dimension, system.control_dimension)
+            train_data = Data_Def(t_setpoint.numpy(), setpoint.numpy(), system.state_dimension, system.control_dimension)
+            test_data = Data_Def(t_reference_2.numpy(), reference_2, system.state_dimension, system.control_dimension)
+            sim_data = Data_Def(t_reference.numpy()[1::], x_sim_current, system.state_dimension, system.control_dimension)
             plot_results(train_data, test_data, sim_data)# 
 
     # simulate the remainding time with constant control input 
-    u_sim[(i+1)*step_count+1::] = states.equilibrium[system.state_dimension::]
-    x_i = x_sim[(i+1)*step_count]
-    t_setpoint = np.linspace(control_time.end, sim_time.end, int((sim_time.end - control_time.end)/sim_time.step+1))
+    if sim_time.end > control_time.end:
+        u_sim[(i+1)*step_count+1::] = states.equilibrium[system.state_dimension::]
+        x_i = x_sim[(i+1)*step_count]
+        t_reference = np.linspace(control_time.end, sim_time.end, int((sim_time.end - control_time.end)/sim_time.step+1))
 
-    sol = solve_ivp(system.stateTransition, [control_time.end, sim_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=t_setpoint, args=(u_sim, step_time.step ))#, max_step=dt ,  atol = 1, rtol = 1
-    x_sim_current = np.concatenate([sol.y.transpose()[1::], u_sim[(i+1)*step_count:-1]], axis=1)
+        sol = solve_ivp(system.stateTransition, [control_time.end, sim_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=t_reference, args=(u_sim, step_time.step ))#, max_step=dt ,  atol = 1, rtol = 1
+        x_sim_current = np.concatenate([sol.y.transpose()[1::], u_sim[(i+1)*step_count:-1]], axis=1)
 
-    x_sim[(i+1)*step_count+1::] =    x_sim_current
-    
+        x_sim[(i+1)*step_count+1::] =    x_sim_current
+        
     sim_data = Data_Def(t_sim, x_sim, system.state_dimension, system.control_dimension)
     lode_data = Data_Def(t_gp, x_lode, system.state_dimension, system.control_dimension)
     train_data = Data_Def(t_ref, x_ref, system.state_dimension, system.control_dimension)
 
     return sim_data, train_data, lode_data
 
-def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_Description, x_0=None):
+def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_Description, x_0=None, t_past:torch.Tensor=None, past:torch.Tensor=None):
     a = 1
 
     constraint_points = reference_strategy['constraints']
@@ -237,6 +244,9 @@ def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_De
     x_mean = (states.max + states.min) / 2
     x_noise = ((states.max - states.min) / 4) #np.sqrt
 
+    # if reference_strategy['soft_constraints'] == 'equilibrium':
+    #     x_mean[2] = torch.nan
+
     end_time = time_obj.start + constraint_points * time_obj.step
 
     if end_time > time_obj.end:
@@ -244,27 +254,32 @@ def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_De
         constraint_points = int((end_time - time_obj.start) / time_obj.step)
         
 
-    t_trajectory = torch.linspace(time_obj.start, end_time + time_obj.step* (a-1) , constraint_points+a).flatten()
-    trajectory = torch.tile(x_mean, (constraint_points+a, 1))
+    t_setpoint = torch.linspace(time_obj.start, end_time + time_obj.step* (a-1) , constraint_points+a).flatten()
+    setpoint = torch.tile(x_mean, (constraint_points+a, 1))
     noise = torch.tile(x_noise, (constraint_points+a,))
     
-    trajectory[0,:] = states.init
-    #trajectory[0,2] = torch.nan
+    setpoint[0,:] = states.init
+    #setpoint[0,2] = torch.nan
 
     noise[0:x_noise.shape[0]] = init_noise
     
 
     if reference_strategy['target'] is True:
-        t_trajectory[-1] = time_obj.end
-        trajectory[-1,:] = states.target
-        #trajectory[-1,2] = torch.nan
+        t_setpoint[-1] = time_obj.end
+        setpoint[-1,:] = states.target
+        #setpoint[-1,2] = torch.nan
         #noise[-x_noise.shape[0]::] = target_noise
 
         noise[-x_noise.shape[0]::] = target_noise
         #noise[-1] = x_noise[2] / 4
         #noise[2] = x_noise[2] / 8
 
-        # trajectory[-1,2] = x_mean[2]
+        # setpoint[-1,2] = x_mean[2]
         # noise[-1] = x_noise[2]
+    
+    if t_past is not None and past is not None:
+        t_setpoint = torch.cat((t_past, t_setpoint))
+        setpoint = torch.cat((past, setpoint))
+        noise = torch.cat((torch.tile(init_noise*1e5,(t_past.shape[0],)), noise))
 
-    return trajectory, t_trajectory, noise
+    return setpoint, t_setpoint, noise

@@ -128,8 +128,13 @@ class LODEGP_Deprecated(gpytorch.models.ExactGP):
 
 
 class LODEGP(gpytorch.models.ExactGP):
+    num_tasks:int
+    contains_nan:bool
+
     def __init__(self, train_x:torch.Tensor, train_y:torch.Tensor, likelihood:gpytorch.likelihoods.Likelihood, num_tasks:int, A, mean_module:gpytorch.means.Mean=None):
         self.contains_nan = any(train_y.isnan().flatten())
+        self.num_tasks = num_tasks
+
         if self.contains_nan:
             train_y, self.mask = create_mask(train_y)
 
