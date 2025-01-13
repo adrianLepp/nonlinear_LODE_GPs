@@ -202,6 +202,7 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
             sim_data = Data_Def(t_setpoint.numpy()[1::], x_sim_current, system.state_dimension, system.control_dimension)
             plot_results(train_data, test_data, sim_data)# 
 
+    # simulate the remainding time with constant control input 
     u_sim[(i+1)*step_count+1::] = states.equilibrium[system.state_dimension::]
     x_i = x_sim[(i+1)*step_count]
     t_setpoint = np.linspace(control_time.end, sim_time.end, int((sim_time.end - control_time.end)/sim_time.step+1))

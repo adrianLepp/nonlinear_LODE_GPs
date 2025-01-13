@@ -57,7 +57,7 @@ target_noise = [1e-7, 1e-7, 1e-11]
 
 # Reference
 reference_strategie = {
-    'target': True,
+    'target': False,
     'constraints' : 10,
     'init_noise' : init_noise,
     'target_noise' : target_noise,
@@ -68,7 +68,7 @@ u_1 = 0.2   # control input to find equilibrium where we start
 u_2 = 0.3 # control input to find equilibrium where we want to end and linearize around
 
 # TIME
-t = 100
+t = 400
 
 control_time = Time_Def(
     0, 
@@ -78,7 +78,7 @@ control_time = Time_Def(
 
 sim_time = Time_Def(
     0, 
-    t + 100, 
+    t + 1, 
     step=0.1
 )
 
@@ -100,10 +100,12 @@ x_e = torch.tensor(equilibrium)
 
 # soft constraints for states
 #x_min = torch.tensor([system.x_min[0],system.x_min[1], x_e[2]])
-# x_min = x_e / 2
-# x_max = x_e * 2
+
 x_min = torch.tensor(system.x_min)
 x_max = torch.tensor(system.x_max)
+constraint_factor = 1.1
+x_min = torch.tensor(x_e / constraint_factor)
+x_max = torch.tensor(x_e * constraint_factor)
 
 #x_min[2] = x_e[2]
 states = State_Description(x_e, x_0, min=x_min, max=x_max)
