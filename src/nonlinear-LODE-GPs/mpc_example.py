@@ -52,17 +52,17 @@ print("\n-----------------------------------------------------------------------
 
 
 init_noise = [1e-8, 1e-8, 1e-12]
-target_noise = [1e-8, 1e-8, 1e-12]#[1e-7, 1e-7, 1e-11]
+target_noise = [1e-7, 1e-7, 1e-11]# [1e-8, 1e-8, 1e-12]#
 
 
 # Reference
 reference_strategie = {
-    'target': True,
+    'target': False,
     'constraints' : 10,
     'past-values' : 0,
     'init_noise' : init_noise,
     'target_noise' : target_noise,
-    'soft_constraints' : 'equilibrium' # 'state_limit' or 'equilibrium'
+    'soft_constraints' : 'state_limit' # 'state_limit' or 'equilibrium'
 }
 
 # Equilibrium values for the system
@@ -70,7 +70,7 @@ u_1 = 0.2   # control input to find equilibrium where we start
 u_2 = 0.3 # control input to find equilibrium where we want to end and linearize around
 
 # TIME
-t = 100
+t = 200
 
 control_time = Time_Def(
     0, 
@@ -80,7 +80,7 @@ control_time = Time_Def(
 
 sim_time = Time_Def(
     0, 
-    t + 100 , 
+    200, 
     step=0.1
 )
 
@@ -88,7 +88,8 @@ sim_time = Time_Def(
 optim_steps = 0
 pretrain_steps = 200
 hyperparameters = {
-    #'lengthscale_2': 3
+    # 'lengthscale_2': 3.6731,
+    #'signal_variance_2': 0.1, # negative
 }
 
 
@@ -108,8 +109,10 @@ if reference_strategie['soft_constraints'] == 'state_limit':
     x_max = torch.tensor(system.x_max)
 elif reference_strategie['soft_constraints'] == 'equilibrium':
     #constraint_factor = 1.1
-    x_min = torch.tensor(x_e * 0.9)
-    x_max = torch.tensor(x_e * 1.1)
+    x_min = x_e * 0.9
+    #x_min =torch.cat((x_e[0:system.state_dimension] * 0.9, x_e[system.state_dimension::] * 0.5),0)
+    x_max = x_e * 1.1
+    #x_max =torch.cat((x_e[0:system.state_dimension] * 1.1, x_e[system.state_dimension::] * 2),0)
 
 #x_min[2] = x_e[2]
 states = State_Description(x_e, x_0, min=x_min, max=x_max)
@@ -148,9 +151,9 @@ control_err = mse_mean(
     #torch.zeros_like(torch.tensor(lode_data))
 )
 
-control_sum =  sum(sim_data.y[0:control_time.count+1,2])
+control_mean =  mean(sim_data.y[:,2])#0:control_time.count+1
 
-print(f"Control sum: {control_sum}")
+print(f"mean Control: {control_mean}")
 print(f"Control error: {control_err}")
 print(f"Constraint violation: {constraint_viol}")
 

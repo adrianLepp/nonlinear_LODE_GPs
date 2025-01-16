@@ -65,7 +65,7 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
 
         # enforce constraints (heuristics)
         #FIXME: system specific
-        gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_2))
+        #gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_2))
         # max_signal_variance = 1
         # if gp.covar_module.model_parameters.signal_variance_2 > max_signal_variance:
         #     gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(torch.tensor(max_signal_variance))
@@ -118,8 +118,10 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
     print("\n----------------------------------------------------------------------------------\n")
     print('Trained model parameters:')
     named_parameters = list(model.named_parameters())
+    param_conversion = torch.nn.Softplus()
+
     for j in range(len(named_parameters)):
-        print(named_parameters[j][0], named_parameters[j][1].data) #.item()
+        print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
     print("\n----------------------------------------------------------------------------------\n")
 
 
@@ -129,7 +131,7 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
 def predict_reference(model:LODEGP, step_time:Time_Def, states:State_Description, x_i:np.ndarray, t_i:float, convergence:bool, EARLY_CONVERGENCE:bool=False):
     t_reference = torch.linspace(step_time.start, step_time.end, step_time.count+1)
 
-    if EARLY_CONVERGENCE and np.isclose(x_i, states.target, rtol=1e-3).all(): #, atol=1e-3
+    if EARLY_CONVERGENCE and np.isclose(x_i, states.target, rtol=1e-2).all(): #, atol=1e-3
         if convergence is False:
             convergence = True
             print(f'Target reached at time {t_i}')
