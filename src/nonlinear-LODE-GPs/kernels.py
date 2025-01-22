@@ -113,6 +113,9 @@ class LODE_Kernel(Kernel):
                 print(str(self.kernel_translation_dict))
 
 
+
+
+
 def create_kernel_matrix_from_diagonal(D):
     t1, t2 = var("t1, t2")
     translation_dictionary = dict()

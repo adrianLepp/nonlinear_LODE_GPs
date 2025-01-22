@@ -9,7 +9,7 @@ import gpytorch
 
 
 class Equilibrium_Mean(MultitaskMean):
-    def __init__(self, mean_values, num_tasks, prior_variance=1e-8, mean_deviation=1e-12):
+    def __init__(self, mean_values:torch.Tensor, num_tasks:int, prior_variance=1e-8, mean_deviation=1e-12):
         mean_modules = []
         for i in range(len(mean_values)):
             mean_modules.append(gpytorch.means.ConstantMean(

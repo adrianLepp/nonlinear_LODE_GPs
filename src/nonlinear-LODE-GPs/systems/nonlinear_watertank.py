@@ -91,7 +91,8 @@ class Nonlinear_Watertank(ODE_System):
             
             u[control_idx] = u_current
         elif u is not None: #if isinstance(u, (list, tuple)):
-            u_current = u[control_idx,0]
+            #u_current = u[control_idx,0]
+            u_current = u[control_idx].squeeze()
 
         
 

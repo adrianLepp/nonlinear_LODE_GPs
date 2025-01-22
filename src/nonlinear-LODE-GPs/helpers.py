@@ -70,7 +70,12 @@ def simulate_system(system, x0, tStart, tEnd, num_data, u = None, linear=False):
 
         x = sol.y.transpose()
 
-        solution = (torch.tensor(x[:,0]), torch.tensor(x[:,1]), torch.tensor(x[:,2]), torch.tensor(u.squeeze())) #FIXME: model specific
+        solution = []
+        #solution = (torch.tensor(x[:,0]), torch.tensor(x[:,1]), torch.tensor(x[:,2]), torch.tensor(u.squeeze())) #FIXME: model specific
+        for i in range (x.shape[1]):
+            solution.append(torch.tensor(x[:,i]))
+        solution.append(torch.tensor(u.squeeze()))
+        
         train_y = torch.stack(solution, -1)
     except:
         print("Error in system")
@@ -195,10 +200,17 @@ class Data_Def():
         self.state_dim = state_dim
         self.control_dim = control_dim
 
-def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None):
+def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None, equilibrium=None):
     labels = ['train', 'gp', 'sim']
     fig, ax1 = plt.subplots()
     ax2 = ax1.twinx()
+
+    alpha_eq = 0.5
+
+    if equilibrium is not None:
+        eq_range = np.array([equilibrium, equilibrium])
+        t_range = [test.time[0], test.time[-1]]
+        
 
     for i in range(test.state_dim):
         color = f'C{i}'
@@ -206,6 +218,9 @@ def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None):
         ax1.plot(test.time, test.y[:, i], color=color, label=f'x{i+1}_{labels[1]}', alpha=0.5)
         if ref is not None:
             ax1.plot(ref.time, ref.y[:, i], '--', color=color, label=f'x{i+1}_{labels[2]}')
+        
+        if equilibrium is not None:
+            ax1.plot(t_range, eq_range[:,i], '--', label=f'x{i+1}_eq',color=color, alpha=alpha_eq)
 
     for i in range(test.control_dim):
         idx = test.state_dim + i
@@ -214,6 +229,9 @@ def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None):
         ax2.plot(test.time, test.y[:, idx], color=color, label=f'u{i+1}_{labels[1]}', alpha=0.5)
         if ref is not None:
             ax2.plot(ref.time, ref.y[:, idx], '--', color=color, label=f'u{i+1}_{labels[2]}')
+
+        if equilibrium is not None:
+            ax2.plot(t_range, eq_range[:,idx], '--', label=f'u{i+1}_eq',color=color, alpha=alpha_eq)
 
     ax2.tick_params(axis='y', labelcolor=color)
 
