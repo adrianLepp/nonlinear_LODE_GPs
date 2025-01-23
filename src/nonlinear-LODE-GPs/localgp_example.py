@@ -20,20 +20,25 @@ device = 'cpu'
 
 system_name = "nonlinear_watertank"
 
+optim_steps = 50
+
+u_0 = 0.2
+u_1 = 0.3
+
+t0 = 0
+t1 = 500
+
 train_time = Time_Def(
-    0, 
-    100, 
-    step=1
+    t0, 
+    t1, 
+    step=5
 )
 
 test_time = Time_Def(
-    0, 
-    100, 
+    t0, 
+    t1, 
     step=0.1
 )
-
-u_0 = 0.2
-u_1 = 0.21
 
 system = load_system(system_name)
 num_tasks = system.dimension
@@ -44,7 +49,7 @@ system_matrix_1 , x1 = system.get_ODEmatrix(u_1)
 
 system_matrices = [system_matrix_0, system_matrix_1]
 equilibriums = [torch.tensor(x0), torch.tensor(x1)]
-centers = [0, 1000]
+centers = [torch.tensor([[t0]]), torch.tensor([[t1]])]
 
 # x_0 = torch.tensor(x0)
 # system_matrix , equilibrium = system.get_ODEmatrix(u_1)
@@ -52,22 +57,22 @@ centers = [0, 1000]
 
 #states_0 = State_Description(x_e, x_0)
 
-u = np.linspace(u_0 * system.param.u, u_0 * system.param.u, train_time.count,axis=-1)
+u = np.linspace(u_1 * system.param.u, u_1 * system.param.u, train_time.count,axis=-1)
 
 
-train_x, train_y= simulate_system(system, equilibriums[1][0:system.state_dimension], train_time.start, train_time.end, train_time.count, u)
+train_x, train_y= simulate_system(system, equilibriums[0][0:system.state_dimension], train_time.start, train_time.end, train_time.count, u)
 
 #sol = solve_ivp(system.stateTransition, [train_time.start, train_time.end], x_0[0:system.state_dimension], method='RK45', t_eval=t_reference.numpy(), args=(u, train_time.step ), max_step=train_time.step)#, max_step=dt ,  atol = 1, rtol = 1
 
 
 #x_sim_current = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
 likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
-model = Sum_LODEGP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=44194)
+model = Sum_LODEGP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=44194/2)
 
 
 # mean_module = Equilibrium_Mean(states.equilibrium, num_tasks)
 # model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module)
-optimize_gp(model,100)
+optimize_gp(model, optim_steps)
 
 test_x = torch.linspace(test_time.start, test_time.end, test_time.count)
 model.eval()

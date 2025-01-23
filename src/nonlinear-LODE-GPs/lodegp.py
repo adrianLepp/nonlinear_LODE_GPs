@@ -15,6 +15,8 @@ from likelihoods import MultitaskGaussianLikelihoodWithMissingObs
 from noise_models import MaskedNoise
 from mean_modules import *
 
+DEBUG = False
+
 def optimize_gp(gp, training_iterations=100, verbose=True):
     # Find optimal model hyperparameters
     gp.train()
@@ -231,7 +233,7 @@ class Changepoint_LODEGP(gpytorch.models.ExactGP):
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x) 
     
 class Sum_LODEGP(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, num_tasks:int, A_list:List, equilibrium_list:List[torch.Tensor], center_list:List[float], weight_lengthscale:torch.Tensor):
+    def __init__(self, train_x, train_y, likelihood, num_tasks:int, A_list:List, equilibrium_list:List[torch.Tensor], center_list:List[torch.Tensor], weight_lengthscale:torch.Tensor):
         self.num_tasks = num_tasks
         super(Sum_LODEGP, self).__init__(train_x, train_y, likelihood)
         
@@ -242,30 +244,11 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             "t_zeroes": torch.zeros_like(train_x-train_x.t())
         }
 
-        #self.weighting_function = Weighting_Function(torch.Tensor([[100]]))
-
-
-        #self.mean_module = Equilibrium_Mean(equilibrium, num_tasks) * gpytorch.means.MultitaskMean(gpytorch.means.ZeroMean(), num_tasks=num_tasks)
-        #self.mean_module = Equilibrium_Mean(equilibrium, num_tasks) + gpytorch.means.MultitaskMean(Weigthing_Mean(self.weighting_function), num_tasks) 
-        #self.mean_module = Local_Mean(equilibrium, num_tasks, torch.Tensor([[100]]))
         means = []
         kernels = []
         for i in range(len(A_list)):
-            means.append(Local_Mean(equilibrium_list[i], num_tasks, torch.Tensor([[center_list[i]]]), weight_lengthscale))
-            kernels.append(Local_Kernel(LODE_Kernel(A_list[i], self.common_terms), num_tasks, torch.Tensor([[center_list[i]]]), weight_lengthscale))
-
-        # self.mean_module = Global_Mean([
-        #     Local_Mean(equilibrium, num_tasks, torch.Tensor([[t_1]])),
-        #     Local_Mean(equilibrium, num_tasks, torch.Tensor([[t_2]]))
-        #     ], num_tasks)
-        
-        #self.covar_module = MultitaskKernel(RBFKernel(), num_tasks) * LODE_Kernel(A, self.common_terms)
-        #self.covar_module = Local_Kernel(LODE_Kernel(A, self.common_terms), torch.Tensor([[0]]), num_tasks) 
-
-        # self.covar_module = Global_Kernel([
-        #     Local_Kernel(LODE_Kernel(A, self.common_terms), torch.Tensor([[t_1]]), num_tasks), 
-        #     Local_Kernel(LODE_Kernel(A, self.common_terms), torch.Tensor([[t_2]]), num_tasks), 
-        # ], num_tasks)
+            means.append(Local_Mean(equilibrium_list[i], num_tasks, center_list[i], weight_lengthscale))
+            kernels.append(Local_Kernel(LODE_Kernel(A_list[i], self.common_terms), num_tasks, center_list[i], weight_lengthscale))
 
         self.mean_module = Global_Mean(means, num_tasks)
         self.covar_module = Global_Kernel(kernels, num_tasks)
@@ -274,19 +257,28 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
         if not torch.equal(X, self.train_inputs[0]):
             self.common_terms["t_diff"] = X-X.t()
             self.common_terms["t_sum"] = X+X.t()
-        # weight_matrix = self.weighting_function(X)
-        # weight_matrix_ = torch.tile(weight_matrix,(self.num_tasks,1))
-        # mean_x = weight_matrix * self.mean_module(X)
-        # covar_x = weight_matrix_.t() * self.covar_module(X, common_terms=self.common_terms) * weight_matrix_
-        # dist = gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)
-        # for i in range(dist.mean.shape[0]):
-        #     dist[i] = dist[i] / weight_matrix_[i,0].detach().item()
 
-        # return dist
         mean_x = self.mean_module(X)
         covar_x = self.covar_module(X, common_terms=self.common_terms)
+
+        # if X % 10 == 0:
+        if DEBUG:
+            plot_weights(X, mean_x[:,0], 'Global Mean')
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)
     
+import matplotlib.pyplot as plt
+def plot_weights(x, weights, title="Weighting Function"):
+    plt.figure(figsize=(12, 6))
+    if isinstance(weights, list):
+        for i, weight in enumerate(weights):
+            plt.plot(x, weight, label=f'Weight {i}')
+        plt.legend()
+    else:
+        plt.plot(x, weights)
+    plt.xlabel("x")
+    plt.ylabel("Weight")
+    plt.title(title)
+    plt.show()
 
 class Weighting_Function(gpytorch.Module):#gpytorch.Module
     def __init__(self, center:torch.Tensor, lengthscale:torch.Tensor):
@@ -299,14 +291,13 @@ class Weighting_Function(gpytorch.Module):#gpytorch.Module
     def forward(self, x):
         center = self.center
         
-        x_ = x.div(self.lengthscale)
-        center_ = center.div(self.lengthscale)
-        unitless_sq_dist = self.covar_dist(x_, center_)
+        # x_ = x.div(self.lengthscale)
+        # center_ = center.div(self.lengthscale)
+        unitless_sq_dist = self.covar_dist(x, center, square_dist=True)
         # clone because inplace operations will mess with what's saved for backward
-        covar_mat = unitless_sq_dist.div_(-2.0).exp_()
+        covar_mat = unitless_sq_dist.div_(-2.0*self.lengthscale).exp_()
         return covar_mat
     
-
         # return RBFCovariance.apply(
         #     input,
         #     self.center,
@@ -367,9 +358,17 @@ class Global_Mean(Mean):
         mean = sum(local_mean(x) for local_mean in self.local_means)
 
         # mean = torch.zeros_like(x)
-        # for local_mean in self.local_means:
-        #     weight += local_mean.weighting_function(x)
-        #     mean += local_mean(x)
+        if DEBUG:
+            weights = []
+            local_means = []
+            for local_mean in self.local_means:
+                weights.append(local_mean.weighting_function(x))
+                local_means.append(local_mean(x))
+                
+            plot_weights(x, weights)
+            plot_weights(x, [local_means[0][:,0],local_means[1][:,0]], 'Local Means')
+            plot_weights(x, weight, 'Sum of Weights')
+
         return mean / weight
     
     
