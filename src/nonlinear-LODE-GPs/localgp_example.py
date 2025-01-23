@@ -12,7 +12,7 @@ import torch
 import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------------------------
-from  lodegp import LODEGP, Sum_LODEGP, optimize_gp
+from  lodegp import *
 from helpers import *
 
 torch.set_default_dtype(torch.float64)
@@ -26,12 +26,14 @@ u_0 = 0.2
 u_1 = 0.3
 
 t0 = 0
-t1 = 500
+t1 = 1000
+
+output_distance = False
 
 train_time = Time_Def(
     t0, 
     t1, 
-    step=5
+    step=10
 )
 
 test_time = Time_Def(
@@ -47,9 +49,34 @@ num_tasks = system.dimension
 system_matrix_0 , x0 = system.get_ODEmatrix(u_0)
 system_matrix_1 , x1 = system.get_ODEmatrix(u_1)
 
-system_matrices = [system_matrix_0, system_matrix_1]
-equilibriums = [torch.tensor(x0), torch.tensor(x1)]
-centers = [torch.tensor([[t0]]), torch.tensor([[t1]])]
+system_matrices = [
+    system_matrix_0, 
+    system_matrix_1
+    ]
+equilibriums = [
+    torch.tensor(x0), 
+    torch.tensor(x1)
+    ]
+if output_distance is True:
+    centers = [
+        torch.tensor([x0]), 
+        torch.tensor([x1])
+    ]
+else:
+    centers  = [torch.tensor([[t0]]), torch.tensor([[t1]])]
+
+
+l  = 1
+#l = 2.65e-3
+l = 44194/2
+# w_func = Weighting_Function(centers[0],l)
+# d = w_func.covar_dist(centers[1], w_func.center, square_dist=True)
+# l = d*torch.sqrt(torch.tensor(2))/8
+# print(l)
+#l = 1000
+
+# print(w_func.covar_dist(centers[1], w_func.center, square_dist=True))
+# print(w_func(centers[1]))
 
 # x_0 = torch.tensor(x0)
 # system_matrix , equilibrium = system.get_ODEmatrix(u_1)
@@ -67,7 +94,7 @@ train_x, train_y= simulate_system(system, equilibriums[0][0:system.state_dimensi
 
 #x_sim_current = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
 likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
-model = Sum_LODEGP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=44194/2)
+model = Sum_LODEGP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l, output_distance=output_distance)
 
 
 # mean_module = Equilibrium_Mean(states.equilibrium, num_tasks)
@@ -86,4 +113,4 @@ with torch.no_grad():
 train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension)
 test_data = Data_Def(test_x.numpy(), output.mean.numpy(), system.state_dimension, system.control_dimension)
 
-plot_results(train_data, test_data, equilibrium=equilibriums[1])
+plot_results(train_data, test_data, equilibrium=x1)
