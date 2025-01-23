@@ -25,10 +25,10 @@ optim_steps = 50
 u_0 = 0.2
 u_1 = 0.3
 
-t0 = 0
-t1 = 1000
+t0 = 0.0
+t1 = 1000.0
 
-output_distance = False
+output_distance = True
 
 train_time = Time_Def(
     t0, 
@@ -63,15 +63,18 @@ if output_distance is True:
         torch.tensor([x1])
     ]
 else:
-    centers  = [torch.tensor([[t0]]), torch.tensor([[t1]])]
+    centers  = [
+        torch.tensor([[t0]]), 
+        torch.tensor([[t1]])
+    ]
 
 
 l  = 1
 #l = 2.65e-3
-l = 44194/2
-# w_func = Weighting_Function(centers[0],l)
-# d = w_func.covar_dist(centers[1], w_func.center, square_dist=True)
-# l = d*torch.sqrt(torch.tensor(2))/8
+#l = 44194
+w_func = Weighting_Function(centers[0],l)
+d = w_func.covar_dist(centers[1], w_func.center, square_dist=True)
+l = d*torch.sqrt(torch.tensor(2))/8
 # print(l)
 #l = 1000
 
