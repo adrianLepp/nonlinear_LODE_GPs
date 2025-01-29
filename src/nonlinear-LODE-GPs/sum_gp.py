@@ -120,17 +120,29 @@ class Local_GP_Sum(gpytorch.Module):
         self.models = ModuleList(models)
         self.w_fcts = ModuleList(w_fcts)
 
-        self.likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
+        self.likelihood =likelihood# gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
     
     def optimize(self, model, training_iterations=100, verbose=False):
         for model in self.models:
             optimize_gp(model, training_iterations=training_iterations, verbose=verbose)
+
+            print("\n----------------------------------------------------------------------------------\n")
+            print(f'Trained model parameters:')
+            named_parameters = list(model.named_parameters())
+            param_conversion = torch.nn.Softplus()
+
+            for j in range(len(named_parameters)):
+                print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+            print("\n----------------------------------------------------------------------------------\n")
 
     def eval(self):
         for model in self.models:
             model.eval()
             model.likelihood.eval()
         self.likelihood.eval()
+
+    def set_train_data(self, x, y, **kwargs):
+        [model.set_train_data(x, y, **kwargs) for model in self.models]
         
 
     def predict(self, x):
@@ -139,3 +151,7 @@ class Local_GP_Sum(gpytorch.Module):
             weights = [self.w_fcts[i](output.mean) for i, output in enumerate(outputs)]
             out = sum([outputs[i].mean * weights[i] for i in range(len(outputs))])/sum(weights)
         return out, weights
+    
+    def forward(self, x):
+        out, weights = self.predict(x)
+        return gpytorch.distributions.MultitaskMultivariateNormal(out, torch.eye(out.shape[0]*out.shape[1]))

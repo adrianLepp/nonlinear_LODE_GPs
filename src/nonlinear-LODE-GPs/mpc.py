@@ -18,31 +18,35 @@ from masking import *
 from mean_modules import Equilibrium_Mean
 
 def update_gp(model:LODEGP, train_x:torch.Tensor, train_y:torch.Tensor, manual_noise:torch.Tensor, optim_steps:int=0):
-    # v1
-    #model.likelihood.set_noise(torch.tensor(train_noise))
-    #model.set_train_data(torch.tensor(t_setpoint), torch.tensor(setpoint) - torch.tensor(states.equilibrium), strict=False)
+    if isinstance(model.likelihood, MultitaskGaussianLikelihoodWithMissingObs):
+        train_y_masked, mask = create_mask(train_y)
+        model.mask = mask
+        model.set_train_data(train_x, train_y_masked, strict=False)
+        noise_strategy = MaskedManualNoise(mask, manual_noise)
+        model.likelihood.set_noise_strategy(noise_strategy)
 
-    #v2
-    train_y_masked, mask = create_mask(train_y)
-    model.mask = mask
-    model.set_train_data(train_x, train_y_masked, strict=False)
-    noise_strategy = MaskedManualNoise(mask, manual_noise)
-    model.likelihood.set_noise_strategy(noise_strategy)
+    else:
+        #model.likelihood.set_noise(torch.tensor(train_noise))
+        model.set_train_data(train_x, train_y, strict=False)
 
-    optimize_mpc_gp(model,train_x, mask_stacked=torch.ones((train_x.shape[0], model.num_tasks)).bool(), training_iterations=optim_steps, verbose=False)
+    if optim_steps > 0:
+        optimize_mpc_gp(model,train_x, training_iterations=optim_steps, verbose=False)
 
 def inference_mpc_gp(model:LODEGP, test_x:torch.Tensor):
     model.eval()
     
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         outputs = model(test_x)
-        predictions = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=test_x, mask=model.mask)
+        if isinstance(model.likelihood, MultitaskGaussianLikelihoodWithMissingObs):
+            predictions = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=test_x, mask=model.mask)
+        else:
+            predictions = model.likelihood(outputs)
         mean = predictions.mean
-        lower, upper = predictions.confidence_region()
+        #lower, upper = predictions.confidence_region()
 
     return mean
 
-def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, verbose=True):
+def optimize_mpc_gp(gp:LODEGP, train_x, training_iterations=100, verbose=True):
     gp.train()
     gp.likelihood.train()
 
@@ -64,7 +68,6 @@ def optimize_mpc_gp(gp:LODEGP, train_x, mask_stacked, training_iterations=100, v
         optimizer.step()
 
         # enforce constraints (heuristics)
-        #FIXME: system specific
         #gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_2))
         # max_signal_variance = 1
         # if gp.covar_module.model_parameters.signal_variance_2 > max_signal_variance:
@@ -113,7 +116,7 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
             else:
                 print(f'Hyperparameter {key} not found in model')
 
-    optimize_mpc_gp(model, train_x, mask_stacked=torch.ones((train_x.shape[0], num_tasks)).bool(), training_iterations=optim_steps)
+    optimize_mpc_gp(model, train_x, training_iterations=optim_steps)
 
     print("\n----------------------------------------------------------------------------------\n")
     print('Trained model parameters:')
@@ -140,7 +143,7 @@ def predict_reference(model:LODEGP, step_time:Time_Def, states:State_Description
     
     else:
         _reference = inference_mpc_gp(model, t_reference)
-        if any(model.mask) is True:
+        if isinstance(model.likelihood,MultitaskGaussianLikelihoodWithMissingObs) and any(model.mask) is True:
             reference = stack_plot_tensors(_reference, model.num_tasks).numpy()
         else:
             reference = _reference.numpy()

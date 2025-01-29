@@ -182,10 +182,13 @@ class State_Description():
     min:torch.Tensor
     max:torch.Tensor
 
-    def __init__(self, equilibrium:torch.Tensor, init:torch.Tensor, target:torch.Tensor=None,  min:torch.Tensor=None, max:torch.Tensor=None):
-        self.equilibrium = equilibrium
+    def __init__(self, equilibrium:torch.Tensor=None, init:torch.Tensor=None, target:torch.Tensor=None,  min:torch.Tensor=None, max:torch.Tensor=None):
         self.init = init
 
+        if equilibrium is None:
+            self.equilibrium = target
+        else:
+            self.equilibrium = equilibrium
         if target is None:
             self.target = equilibrium
         else:

@@ -62,16 +62,12 @@ equilibriums = [
     torch.tensor(x0), 
     torch.tensor(x1)
     ]
-if output_distance is True:
-    centers = [
-        torch.tensor([x0]), 
-        torch.tensor([x1])
-    ]
-else:
-    centers  = [
-        torch.tensor([[t0]]), 
-        torch.tensor([[t1]])
-    ]
+
+centers = [
+    torch.tensor([x0]), 
+    torch.tensor([x1])
+]
+
 
 
 l  = 1

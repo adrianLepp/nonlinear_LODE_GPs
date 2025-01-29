@@ -17,8 +17,10 @@ def optimize_gp(gp, training_iterations=100, verbose=True):
 
     # "Loss" for GPs - the marginal log likelihood
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(gp.likelihood, gp)
+    
     #print(list(self.named_parameters()))
     for i in range(training_iterations):
+        
         optimizer.zero_grad()
         output = gp(gp.train_inputs[0])#FIXME: 
         loss = -mll(output, gp.train_targets)
@@ -125,15 +127,15 @@ class LODEGP_Deprecated(gpytorch.models.ExactGP):
 
 class LODEGP(gpytorch.models.ExactGP):
     num_tasks:int
-    contains_nan:bool#MultitaskGaussianLikelihoodWithMissingObs
+    # contains_nan:bool#MultitaskGaussianLikelihoodWithMissingObs FIXME:
 
     def __init__(self, train_x:torch.Tensor, train_y:torch.Tensor, likelihood:gpytorch.likelihoods.Likelihood, num_tasks:int, A, mean_module:gpytorch.means.Mean=None):
-        self.contains_nan = any(train_y.isnan().flatten())#MultitaskGaussianLikelihoodWithMissingObs
+        # self.contains_nan = any(train_y.isnan().flatten())#MultitaskGaussianLikelihoodWithMissingObs FIXME:
         self.num_tasks = num_tasks
 
-        #MultitaskGaussianLikelihoodWithMissingObs
-        if self.contains_nan:
-            train_y, self.mask = create_mask(train_y)
+        #MultitaskGaussianLikelihoodWithMissingObs FIXME
+        # if self.contains_nan:
+        #     train_y, self.mask = create_mask(train_y)
 
         super(LODEGP, self).__init__(train_x, train_y, likelihood)
 
@@ -161,11 +163,12 @@ class LODEGP(gpytorch.models.ExactGP):
         covar_x = self.covar_module(X, common_terms=self.common_terms)
 
         #MultitaskGaussianLikelihoodWithMissingObs
-        if self.contains_nan:   
-            mean_x, covar_x = masking(base_mask=self.mask, mean=mean_x, covar=covar_x, fill_zeros=True)
-            return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)   
-        else:   
-            return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)   
+        # if self.contains_nan:   
+        #     mean_x, covar_x = masking(base_mask=self.mask, mean=mean_x, covar=covar_x, fill_zeros=True)
+        #     return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)   
+        # else:
+        # FIXME:    
+        return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)   
 
     
 
