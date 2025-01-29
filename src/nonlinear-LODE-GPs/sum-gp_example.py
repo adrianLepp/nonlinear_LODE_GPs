@@ -22,7 +22,7 @@ device = 'cpu'
 
 system_name = "nonlinear_watertank"
 
-optim_steps = 50
+optim_steps = 100
 
 u_0 = 0.2
 u_1 = 0.3
@@ -104,7 +104,7 @@ train_x, train_y= simulate_system(system, equilibriums[0][0:system.state_dimensi
 likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
 #model = Weighted_Sum_GP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
 model = Local_GP_Sum(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
-
+model.optimize(optim_steps)
 
 # mean_module = Equilibrium_Mean(states.equilibrium, num_tasks)
 # model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module)
@@ -120,12 +120,14 @@ likelihood.eval()
 #     output = likelihood(model(test_x))
 #     estimate = output.mean
 with torch.no_grad():
-    estimate = model.predict(test_x)
+    estimate, weights = model.predict(test_x)
 
 
 train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension)
 test_data = Data_Def(test_x.numpy(), estimate.numpy(), system.state_dimension, system.control_dimension)
 
 plot_results(train_data, test_data, equilibrium=x1)
+plot_weights(test_x, weights, title="Weighting Function")
+
 
 # ----------------------------------------------------------------------------  

@@ -107,15 +107,12 @@ class Local_GP_Sum(gpytorch.Module):
     def __init__(self, train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale):
         super(Local_GP_Sum, self).__init__()
 
-        #https://docs.gpytorch.ai/en/v1.12/examples/05_Deep_Gaussian_Processes/DGP_Multitask_Regression.html
-        #https://docs.gpytorch.ai/en/latest/examples/05_Deep_Gaussian_Processes/Deep_Gaussian_Processes.html
         models = []
         w_fcts = []
 
         for i in range(len(system_matrices)):
             mean_module = Equilibrium_Mean(equilibriums[i], num_tasks)
             model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrices[i], mean_module)
-            optimize_gp(model, training_iterations=100, verbose=False)
 
             w_fcts.append(Weighting_Function(centers[i], weight_lengthscale))
             models.append(model)
@@ -125,6 +122,9 @@ class Local_GP_Sum(gpytorch.Module):
 
         self.likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
     
+    def optimize(self, model, training_iterations=100, verbose=False):
+        for model in self.models:
+            optimize_gp(model, training_iterations=training_iterations, verbose=verbose)
 
     def eval(self):
         for model in self.models:
@@ -134,12 +134,8 @@ class Local_GP_Sum(gpytorch.Module):
         
 
     def predict(self, x):
-        #outputs = [self.models[i](x) for i in range(len(self.models))]
-        #means = [self.likelihood(output).mean for output in outputs]
-
-
         with torch.no_grad():
             outputs = [self.likelihood(self.models[i](x)) for i in range(len(self.models))]
             weights = [self.w_fcts[i](output.mean) for i, output in enumerate(outputs)]
             out = sum([outputs[i].mean * weights[i] for i in range(len(outputs))])/sum(weights)
-        return out
+        return out, weights

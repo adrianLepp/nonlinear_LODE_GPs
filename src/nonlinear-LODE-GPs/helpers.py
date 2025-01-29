@@ -321,3 +321,16 @@ def stack_plot_tensors(mean,  num_tasks):#lower, upper,
     # lower = stack_tensor(lower, num_tasks)
     # upper = stack_tensor(upper, num_tasks)
     return mean #lower, upper
+
+def plot_weights(x, weights, title="Weighting Function"):
+    plt.figure(figsize=(12, 6))
+    if isinstance(weights, list):
+        for i, weight in enumerate(weights):
+            plt.plot(x, weight, label=f'Weight {i}')
+        plt.legend()
+    else:
+        plt.plot(x, weights)
+    plt.xlabel("x")
+    plt.ylabel("Weight")
+    plt.title(title)
+    plt.show()
