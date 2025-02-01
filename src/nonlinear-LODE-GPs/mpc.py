@@ -24,23 +24,27 @@ def update_gp(model:LODEGP, train_x:torch.Tensor, train_y:torch.Tensor, manual_n
         model.set_train_data(train_x, train_y_masked, strict=False)
         noise_strategy = MaskedManualNoise(mask, manual_noise)
         model.likelihood.set_noise_strategy(noise_strategy)
-
     else:
         #model.likelihood.set_noise(torch.tensor(train_noise))
         model.set_train_data(train_x, train_y, strict=False)
+
+    if isinstance(model.likelihood, FixedTaskNoiseMultitaskLikelihood):
+        model.likelihood.set_task_noise(manual_noise)
 
     if optim_steps > 0:
         optimize_mpc_gp(model,train_x, training_iterations=optim_steps, verbose=False)
 
 def inference_mpc_gp(model:LODEGP, test_x:torch.Tensor):
     model.eval()
+    model.likelihood.eval()
     
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
-        outputs = model(test_x)
+        noise  = torch.ones(torch.Size((model.num_tasks,test_x.shape[0]))).flatten() * 1e-4
+        outputs = model(test_x, noise)
         if isinstance(model.likelihood, MultitaskGaussianLikelihoodWithMissingObs):
             predictions = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=test_x, mask=model.mask)
         else:
-            predictions = model.likelihood(outputs)
+            predictions = model.likelihood(outputs, noise = noise) #noise = torch.ones_like(test_x) * 1e-4
         mean = predictions.mean
         #lower, upper = predictions.confidence_region()
 
@@ -272,7 +276,7 @@ def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_De
     if reference_strategy['target'] is True:
         t_setpoint[-1] = time_obj.end
         setpoint[-1,:] = states.target
-        #setpoint[-1,2] = torch.nan
+        setpoint[-1,2] = torch.nan
         #noise[-x_noise.shape[0]::] = target_noise
 
         noise[-x_noise.shape[0]::] = target_noise

@@ -73,7 +73,7 @@ end = 3
 # Reference
 reference_strategie = {
     'target': True,
-    'constraints' : 0,
+    'constraints' : 10,
     'past-values' : 0,
     'init_noise' : init_noise,
     'target_noise' : target_noise,
@@ -81,7 +81,7 @@ reference_strategie = {
 }
 
 # TIME
-t = 300
+t = 200
 
 control_time = Time_Def(
     0, 
@@ -97,7 +97,7 @@ sim_time = Time_Def(
 
 # GP settings
 optim_steps = 0
-pretrain_steps = 200
+pretrain_steps = 1
 hyperparameters = {
     # 'lengthscale_2': 3.6731,
     #'signal_variance_2': 0.1, # negative
@@ -149,26 +149,41 @@ states = State_Description(init=state_start, target=state_end, min=x_min, max=x_
 with gpytorch.settings.observation_nan_policy('mask'):
 
 
-    train_y, train_x, manual_noise = create_setpoints(reference_strategie, control_time, states)
-    likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, rank=num_tasks, has_task_noise=True, has_global_noise=false ) #noise_constraint=gpytorch.constraints.Positive()
-    noise=1e-8
-    task_noise = torch.diag(torch.tensor(init_noise, requires_grad=False))
-    # covar_factor = torch.tensor([[0.9944, 0.6625],[0.7241, 0.5495],[0.4949, 0.4975]], requires_grad=False) * noise
-    covar_factor = torch.eye(num_tasks, requires_grad=False)
+    train_y, train_x, task_noise = create_setpoints(reference_strategie, control_time, states)
+    likelihood = FixedTaskNoiseMultitaskLikelihood(num_tasks=num_tasks, noise=torch.tensor([1e-8,1e-8]), rank=num_tasks, has_task_noise=True, task_noise=task_noise)
+    
+    # works
+    # noise=1e-8
+    # task_noise = torch.diag(torch.tensor(init_noise, requires_grad=False))
+    # covar_factor = torch.eye(num_tasks, requires_grad=False)
+    # likelihood.initialize(task_noise_covar=task_noise)
+    # likelihood.task_noise_covar_factor.requires_grad = False
 
     #likelihood.initialize(task_noise_covar=torch.eye(num_tasks, requires_grad=False)*noise)
-    likelihood.initialize(task_noise_covar=task_noise)
     #likelihood.initialize(task_noise_covar_factor=covar_factor)
-
-
     # likelihood.task_noise_covar.requires_grad = Falsev ar.detach()
     # likelihood.task_noise_covar = likelihood.task_noise_covar.detach()
-    likelihood.task_noise_covar_factor.requires_grad = False
 
 
     #model = Weighted_Sum_GP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
     model = Local_GP_Sum(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
     model.optimize(optim_steps)
+
+    if hyperparameters is not None:
+        for key, value in hyperparameters.items():
+            if hasattr(model.covar_module.model_parameters, key):
+                setattr(model.covar_module.model_parameters, key, torch.nn.Parameter(torch.tensor(value), requires_grad=False))
+            else:
+                print(f'Hyperparameter {key} not found in model')
+
+    print("\n----------------------------------------------------------------------------------\n")
+    print('Trained model parameters:')
+    named_parameters = list(model.named_parameters())
+    param_conversion = torch.nn.Softplus()
+
+    for j in range(len(named_parameters)):
+        print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+    print("\n----------------------------------------------------------------------------------\n")
 
     sim_data, ref_data, lode_data = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
 

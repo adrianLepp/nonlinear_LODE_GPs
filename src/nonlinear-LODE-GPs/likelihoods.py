@@ -2,6 +2,7 @@ from gpytorch.likelihoods.multitask_gaussian_likelihood import _MultitaskGaussia
 from gpytorch.likelihoods.noise_models import FixedGaussianNoise
 from gpytorch.lazy import ConstantDiagLazyTensor, KroneckerProductLazyTensor, DiagLazyTensor
 from linear_operator import LinearOperator, operators
+from linear_operator.operators import DiagLinearOperator, ConstantDiagLinearOperator, KroneckerProductLinearOperator
 #from gpytorch.operators import ConstantDiagLinearOperator
 import torch
 from noise_models import MaskedManualNoise, ManualNoise
@@ -9,7 +10,7 @@ from gpytorch.distributions import MultivariateNormal
 from typing import Any
 import gpytorch.settings as settings
 
-class FixedTaskNoiseMultitaskLikelihood(_MultitaskGaussianLikelihoodBase):
+class _FixedTaskNoiseMultitaskLikelihood(_MultitaskGaussianLikelihoodBase):
     def __init__(self, noise, *args, **kwargs):
         noise_covar = FixedGaussianNoise(noise=noise)
         super().__init__(noise_covar=noise_covar, *args, **kwargs)
@@ -69,6 +70,75 @@ class FixedTaskNoiseMultitaskLikelihood2(_MultitaskGaussianLikelihoodBase):
             # TODO: copy over pieces from MultitaskGaussianLikelihood
             #raise NotImplementedError("Task noises not supported yet.")
 
+class FixedTaskNoiseMultitaskLikelihood(_MultitaskGaussianLikelihoodBase):
+    def __init__(
+        self,
+        noise: torch.Tensor,
+        has_task_noise: bool = False,
+        task_noise: torch.Tensor = None,
+        task_noise_factor: torch.Tensor = None,
+        *args,
+        **kwargs
+    ) -> None:
+        noise_covar = FixedGaussianNoise(noise=noise)
+        super().__init__(noise_covar=noise_covar, *args, **kwargs)
+        self.has_global_noise = False
+        self.has_task_noise = has_task_noise
+
+        if self.has_task_noise:
+            if task_noise is not None:
+                self.task_noise = task_noise
+                self.task_noise_factor = None
+            elif task_noise_factor is not None:
+                self.task_noise_factor = task_noise_factor
+                self.task_noise = None
+            else:
+                raise ValueError("Must supply task noise or task noise factor")
+            
+    @property
+    def noise(self) -> torch.Tensor:
+        return self.noise_covar.noise
+
+    @noise.setter
+    def noise(self, value: torch.Tensor) -> None:
+        self.noise_covar.initialize(noise=value)
+        
+    def _shaped_noise_covar(self, base_shape: torch.Size,  *params, add_noise=True, **kwargs): #
+        if self.has_task_noise and self.task_noise is not None:
+            #return DiagLinearOperator(self.task_noise)
+            if 'noise' in kwargs is not None:
+                return DiagLinearOperator(kwargs['noise'])
+            else:
+                return DiagLinearOperator(self.task_noise)
+
+            #TODOL do I need noise covar somehow?
+            # noise = self.noise_covar(*params, shape=torch.Size((base_shape.numel(),)), **kwargs)
+            # return noise
+        else:
+            data_noise = self.noise_covar(*params, shape=torch.Size((base_shape[-2],)), **kwargs)
+
+            if len(params) > 0:
+            # we can infer the shape from the params
+                shape = None
+            else:
+            # here shape[:-1] is the batch shape requested, and shape[-1] is `n`, the number of points
+                shape = base_shape
+
+            _data_noise = self.noise_covar(*params, shape=shape, **kwargs)
+
+            if not self.has_task_noise: 
+                eye = torch.ones(1, device=data_noise.device, dtype=data_noise.dtype)
+                task_noise = ConstantDiagLinearOperator(
+                    eye, diag_shape=torch.Size((self.num_tasks,))
+                )
+            else: # task_noise_factor
+                task_noise_factor = self.task_noise_factor.to(device=data_noise.device, dtype=data_noise.dtype)
+                task_noise = DiagLinearOperator(task_noise_factor)
+        
+            return KroneckerProductLinearOperator(data_noise, task_noise)
+    
+    def set_task_noise(self, task_noise:torch.Tensor):
+        self.task_noise = task_noise
 
 class FixedTaskNoiseMultitaskLikelihood_LinOP(_MultitaskGaussianLikelihoodBase):
     def __init__(self, noise, task_noise= None, *args, **kwargs):

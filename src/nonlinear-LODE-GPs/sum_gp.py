@@ -1,5 +1,5 @@
 import gpytorch 
-from sage.all import *
+# from sage.all import *
 from kernels import *
 import torch
 from mean_modules import *
@@ -107,6 +107,8 @@ class Local_GP_Sum(gpytorch.Module):
     def __init__(self, train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale):
         super(Local_GP_Sum, self).__init__()
 
+        self.num_tasks = num_tasks
+
         models = []
         w_fcts = []
 
@@ -145,13 +147,13 @@ class Local_GP_Sum(gpytorch.Module):
         [model.set_train_data(x, y, **kwargs) for model in self.models]
         
 
-    def predict(self, x):
+    def predict(self, x, noise:torch.Tensor=None):
         with torch.no_grad():
-            outputs = [self.likelihood(self.models[i](x)) for i in range(len(self.models))]
-            weights = [self.w_fcts[i](output.mean) for i, output in enumerate(outputs)]
-            out = sum([outputs[i].mean * weights[i] for i in range(len(outputs))])/sum(weights)
+            outputs = [self.likelihood(self.models[l](x), noise=noise) for l in range(len(self.models))]
+            weights = [self.w_fcts[l](output.mean) for l, output in enumerate(outputs)]
+            out = sum([outputs[l].mean * weights[l] for l in range(len(outputs))])/sum(weights)
         return out, weights
     
-    def forward(self, x):
-        out, weights = self.predict(x)
+    def forward(self, x, noise:torch.Tensor=None):
+        out, weights = self.predict(x, noise=noise)
         return gpytorch.distributions.MultitaskMultivariateNormal(out, torch.eye(out.shape[0]*out.shape[1]))
