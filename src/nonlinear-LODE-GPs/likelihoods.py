@@ -5,10 +5,70 @@ from linear_operator import LinearOperator, operators
 from linear_operator.operators import DiagLinearOperator, ConstantDiagLinearOperator, KroneckerProductLinearOperator
 #from gpytorch.operators import ConstantDiagLinearOperator
 import torch
+import gpytorch
 from noise_models import MaskedManualNoise, ManualNoise
 from gpytorch.distributions import MultivariateNormal
 from typing import Any
 import gpytorch.settings as settings
+import torchrl
+
+'''
+https://github.com/cornellius-gp/gpytorch/issues/899
+'''
+class TruncatedNormal(torch.distributions.Distribution):
+    def __init__(self, mean, sigma, l, u):
+        super().__init__()
+        self.mean = mean
+        self.sigma = sigma
+        self.l = l
+        self.u = u
+
+    def log_prob(self, y):
+        # ... implement equation 6 of the linked paper
+        #TODO
+        pass
+
+
+class TobitLikelihood(gpytorch.likelihoods.Likelihood):
+    def __init__(self, l, u):
+        super().__init__()
+        self.l = l
+        self.u = u
+        self.register_parameter("raw_noise", torch.tensor(0.))
+
+    def forward(self, function_samples):
+        # Make sure the noise is positive
+        noise = torch.nn.functional.softplus(self.raw_noise)  # To make it a positive
+
+        # Return the truncated normal distribution
+        return TruncatedNormal(function_samples, sigma=noise, l=self.l, u=self.u)
+    
+
+class TruncatedGaussianLikelihood(gpytorch.likelihoods.Likelihood):
+    def __init__(self, mean:float, std:float,l:float, u:float):
+        super().__init__()
+        self.mean = mean
+        self.std = std
+        self.l = l
+        self.u = u
+        
+
+    def forward(self, function_samples):
+        '''
+        https://stackoverflow.com/questions/60233216/how-to-make-a-truncated-normal-distribution-in-pytorch
+        '''
+        return torch.nn.init.trunc_normal_(function_samples, mean=self.mean, std=self.std, a=self.l, b=self.u)
+        '''
+        https://pytorch.org/rl/0.6/reference/generated/torchrl.modules.TruncatedNormal.html
+        '''
+        return torchrl.distributions.TruncatedNormal(loc=function_samples, scale=None, upscale=None, min=self.l, max=self.u) #TODO
+        '''
+        TODO: install from git somehow
+        https://github.com/toshas/torch_truncnorm
+        '''
+
+        #https://forum.pyro.ai/t/truncatednormal-distribution-in-pyro/4136/4 TODO check
+    
 
 class _FixedTaskNoiseMultitaskLikelihood(_MultitaskGaussianLikelihoodBase):
     def __init__(self, noise, *args, **kwargs):
@@ -33,8 +93,6 @@ class _FixedTaskNoiseMultitaskLikelihood(_MultitaskGaussianLikelihoodBase):
         else:
             # TODO: copy over pieces from MultitaskGaussianLikelihood
             raise NotImplementedError("Task noises not supported yet.")
-        
-class FixedTaskNoiseMultitaskLikelihood2(_MultitaskGaussianLikelihoodBase):
     def __init__(self, data_noise, task_noise=None, *args, **kwargs):
         noise_covar = FixedGaussianNoise(noise=data_noise)
         super().__init__(noise_covar=noise_covar, *args, **kwargs)
@@ -139,40 +197,6 @@ class FixedTaskNoiseMultitaskLikelihood(_MultitaskGaussianLikelihoodBase):
     
     def set_task_noise(self, task_noise:torch.Tensor):
         self.task_noise = task_noise
-
-class FixedTaskNoiseMultitaskLikelihood_LinOP(_MultitaskGaussianLikelihoodBase):
-    def __init__(self, noise, task_noise= None, *args, **kwargs):
-        noise_covar = FixedGaussianNoise(noise=noise)
-        super().__init__(noise_covar=noise_covar, *args, **kwargs)
-
-        if task_noise is not None:
-            self.has_task_noise = True
-            self.task_noise = task_noise
-        else:
-            self.has_task_noise = False
-
-        self.has_global_noise = False
-        
-    def _shaped_noise_covar(self, shape, add_noise=True, *params, **kwargs):
-        if not self.has_task_noise:
-            data_noise = self.noise_covar(*params, shape=torch.Size((shape[-2],)), **kwargs)
-            eye = torch.ones(1, device=data_noise.device, dtype=data_noise.dtype)
-            # TODO: add in a shape for batched models
-            task_noise = operators.ConstantDiagLinearOperator(eye, diag_shape=torch.Size((self.num_tasks,)))
-            return operators.KroneckerProductLinearOperator(data_noise, task_noise)
-        else:
-            data_noise = self.noise_covar(*params, shape=torch.Size((shape[-2],)), **kwargs)
-            eye = torch.tensor(self.task_noise, device=data_noise.device, dtype=data_noise.dtype)
-            # TODO: add in a shape for batched models
-            task_noise = operators.ConstantDiagLinearOperator(eye, diag_shape=torch.Size((self.num_tasks,)))
-            return operators.KroneckerProductLinearOperator(data_noise, task_noise)
-            
-            # TODO: copy over pieces from MultitaskGaussianLikelihood
-            raise NotImplementedError("Task noises not supported yet.")
-        
-    def set_noise(self, noise):
-        self.noise_covar = FixedGaussianNoise(noise=noise)
-        return None
 
 class MultitaskGaussianLikelihoodWithMissingObs(MultitaskGaussianLikelihood):
     '''
