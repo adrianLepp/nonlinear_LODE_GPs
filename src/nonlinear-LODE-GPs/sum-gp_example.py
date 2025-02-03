@@ -19,7 +19,10 @@ from sum_gp import Local_GP_Sum
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
+SAVE = True
 system_name = "nonlinear_watertank"
+
+SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 optim_steps = 100
 
@@ -65,14 +68,11 @@ for i in range(len(equilibrium_controls)):
     equilibriums.append(torch.tensor(x_e))
     centers.append(torch.tensor([x_e]))
 
-#l  = 1
-#l = 2.65e-3
 #l = 44194
 w_func = Weighting_Function(centers[0])
 d = w_func.covar_dist(centers[1], w_func.center, square_dist=True)
 l = d*torch.sqrt(torch.tensor(2))/8
-# print(l)
-#l = 1000
+
 l = l*4
 
 u = np.linspace(u_ctrl * system.param.u, u_ctrl * system.param.u, train_time.count,axis=-1)
@@ -102,11 +102,22 @@ with torch.no_grad():
     estimate, weights = model.predict(test_x)
 
 
-train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension)
-test_data = Data_Def(test_x.numpy(), estimate.numpy(), system.state_dimension, system.control_dimension)
+train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
+test_data = Data_Def(test_x.numpy(), estimate.numpy(), system.state_dimension, system.control_dimension, test_time)
 
 plot_results(train_data, test_data, equilibrium=equilibriums[4])#, 
 plot_weights(test_x, weights, title="Weighting Function")
 
 
+states = State_Description(
+    equilibrium=equilibriums[4],
+    # equilibrium=torch.stack(equilibriums), 
+    init=x0, 
+    min=None, max=None)
 # ----------------------------------------------------------------------------  
+
+
+if SAVE:
+    config['model_id'] = MODEL_ID
+    config['simulation_id'] = SIM_ID
+    save_everything(system_name, model_path, config, train_data, test_data, sim_data=None, states=states, model_dict=model.state_dict())

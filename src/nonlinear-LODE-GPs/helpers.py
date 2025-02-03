@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import json
 from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config, add_reference_data
 
+default_config ='config.json'
 class Time_Def():
     start:float
     end:float
@@ -53,11 +54,12 @@ class State_Description():
         self.max = max
 
 class Data_Def():
-    def __init__(self, x,y,state_dim:int, control_dim:int):
+    def __init__(self, x,y,state_dim:int, control_dim:int, time:Time_Def=None):
         self.time = x
         self.y = y
         self.state_dim = state_dim
         self.control_dim = control_dim
+        self.time_def = time
 
 def load_system(system_name:str):
 
@@ -339,3 +341,60 @@ def plot_weights(x, weights, title="Weighting Function"):
     plt.ylabel("Weight")
     #plt.title(title)
     plt.show()
+
+
+def get_config(system_name:str, config_file:str=default_config, save:bool=False):
+    print("\n----------------------------------------------------------------------------------\n")
+    try:
+        with open(config_file,"r") as f:
+            config = json.load(f)
+            model_dir=config['model_dir']
+            data_dir=config['data_dir']
+            model_name = config['model_name']
+
+            if save:
+                
+                SIM_ID = config['simulation_id'] + 1
+                MODEL_ID = config['model_id'] + 1
+
+                name =  '_' + model_name + "_" + 'mpc' + "_" + system_name
+                model_path = f'{model_dir}/{str(MODEL_ID)}{name}.pth'
+            else: 
+                SIM_ID = -1
+                MODEL_ID = -1
+                model_path = f'{model_dir}/{model_name}.pth'
+
+        
+        print(f"simulate {system_name}")
+
+        if save:
+            print(f"save model with model id {MODEL_ID}")
+            print(f"save data with data id {SIM_ID}")
+        
+    except:
+        print("No config file found. Data and model will not be saved.")
+    print("\n----------------------------------------------------------------------------------\n")
+
+    return SIM_ID, MODEL_ID, model_path, config
+
+def save_config(config:dict, config_file:str=default_config):
+    with open(config_file,"w") as f:
+        json.dump(config, f)
+
+
+def save_everything(system_name:str, model_name:str, config:dict, train_data:Data_Def, gp_data:Data_Def, sim_data:Data_Def, states:State_Description, model_dict:dict, metrics:list[float]=[]):
+    torch.save(model_dict, model_name)
+
+    add_modelConfig(config['model_id'], system_name, states.init.numpy(), states.equilibrium.numpy(), train_data.time_def.start, train_data.time_def.end, train_data.time_def.step)
+    add_training_data(config['model_id'], train_data.time, train_data.y)
+
+    add_simulationConfig(config['simulation_id'], config['model_id'], system_name, states.init.numpy(), states.equilibrium.numpy(), gp_data.time_def.start, gp_data.time_def.end, gp_data.time_def.step, metrics)
+    add_simulation_data(config['simulation_id'], gp_data.time, gp_data.y)
+
+    if sim_data is not None:
+        add_reference_data(config['simulation_id'], 'nonlinear', sim_data.time, sim_data.y)
+
+    save_config(config)
+    print(f"save model with model id {config['model_id']}")
+    print(f"save data with data id {config['simulation_id']}")
+    pass

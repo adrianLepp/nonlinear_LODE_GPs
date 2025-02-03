@@ -17,42 +17,10 @@ torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
 SAVE = False
-CONFIG_FILE = 'config.json'
 
 system_name = "nonlinear_watertank"
 
-print("\n----------------------------------------------------------------------------------\n")
-try:
-    with open(CONFIG_FILE,"r") as f:
-        config = json.load(f)
-        model_dir=config['model_dir']
-        data_dir=config['data_dir']
-        model_name = config['model_name']
-
-        if SAVE:
-            global SIM_ID, MODEL_ID
-            SIM_ID = config['simulation_id'] + 1
-            MODEL_ID = config['model_id'] + 1
-
-            name =  '_' + model_name + "_" + 'mpc' + "_" + system_name
-            model_path = f'{model_dir}/{str(MODEL_ID)}{name}.pth'
-        else: 
-            SIM_ID = -1
-            MODEL_ID = -1
-            model_path = f'{model_dir}/{model_name}.pth'
-
-    
-    print(f"simulate {system_name}")
-
-    if SAVE:
-        print(f"save model with model id {MODEL_ID}")
-        print(f"save data with data id {SIM_ID}")
-    
-except:
-    print("No config file found. Data and model will not be saved.")
-print("\n----------------------------------------------------------------------------------\n")
-
-
+SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 
 init_noise = [1e-8, 1e-8, 1e-12]
@@ -169,7 +137,6 @@ with gpytorch.settings.observation_nan_policy('mask'):
     model = Local_GP_Sum(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
     model.optimize(optim_steps)
 
-    
 
     sim_data, ref_data, lode_data = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
 
@@ -215,18 +182,15 @@ plot_results(ref_data, lode_data, sim_data)
 
 if SAVE:
     torch.save(model.state_dict(), model_path)
-    with open(CONFIG_FILE,"w") as f:
-        config['model_id'] = MODEL_ID
-        config['simulation_id'] = SIM_ID
-        json.dump(config, f)
+
+    config['model_id'] = MODEL_ID
+    config['simulation_id'] = SIM_ID
+    save_config(config)
+
     add_modelConfig(MODEL_ID, system_name, states.init.numpy(), states.equilibrium.numpy(), control_time.start, control_time.end, control_time.step)
-
     add_training_data(MODEL_ID, ref_data.time, ref_data.y)
-
     add_simulationConfig(SIM_ID, MODEL_ID, system_name, states.init.numpy(), states.equilibrium.numpy(), sim_time.start, sim_time.end, sim_time.step, [control_err, constraint_viol])
-
     add_simulation_data(SIM_ID, lode_data.time, lode_data.y)
-
     add_reference_data(SIM_ID, 'nonlinear', sim_data.time, sim_data.y)
 
     print(f"save model with model id {MODEL_ID}")
