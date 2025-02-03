@@ -111,7 +111,7 @@ else:
 
     u = np.linspace(u_rel * system.param.u, u_rel * system.param.u, train_time.count)
 
-    train_x, train_y= simulate_system(system, x0[0:system.state_dimension], train_time.start, train_time.end, train_time.count, u)
+    train_x, train_y= simulate_system(system, x0[0:system.state_dimension], train_time, u)
     train_y = train_y - torch.tensor(x_r)
 
 
@@ -162,12 +162,12 @@ if REFERENCE:
         u_ref = u_ref - x_r[system.state_dimension:system.state_dimension+system.control_dimension]
         x0_e = x0 - x_r
 
-        ref_x, ref_y= simulate_system(system, x0_e[0:system.state_dimension], test_time.start, test_time.end, test_time.count, u_ref, linear=True)
+        ref_x, ref_y= simulate_system(system, x0_e[0:system.state_dimension], test_time, u_ref, linear=True)
         ref_data = Data_Def(ref_x.numpy(), ref_y.numpy() + x_r, system.state_dimension, system.control_dimension)
     else:
         #u_ref = np.linspace(u_rel * system.param.u, u_rel * system.param.u, test_count)
         u_ref = test_data.y[:,system.state_dimension:system.state_dimension+system.control_dimension].flatten()
-        ref_x, ref_y= simulate_system(system, x0[0:system.state_dimension], test_time.start, test_time.end, test_time.count, u_ref, linear=False)
+        ref_x, ref_y= simulate_system(system, x0[0:system.state_dimension], test_time, u_ref, linear=False)
 
         ref_data = Data_Def(ref_x.numpy(), ref_y.numpy(), system.state_dimension, system.control_dimension)
 

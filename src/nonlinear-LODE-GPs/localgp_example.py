@@ -90,7 +90,7 @@ l = d*torch.sqrt(torch.tensor(2))/8
 u = np.linspace(u_1 * system.param.u, u_1 * system.param.u, train_time.count,axis=-1)
 
 
-train_x, train_y= simulate_system(system, equilibriums[0][0:system.state_dimension], train_time.start, train_time.end, train_time.count, u)
+train_x, train_y= simulate_system(system, equilibriums[0][0:system.state_dimension], train_time, u)
 
 #sol = solve_ivp(system.stateTransition, [train_time.start, train_time.end], x_0[0:system.state_dimension], method='RK45', t_eval=t_reference.numpy(), args=(u, train_time.step ), max_step=train_time.step)#, max_step=dt ,  atol = 1, rtol = 1
 
@@ -104,7 +104,7 @@ model = Sum_LODEGP(train_x, train_y, likelihood, num_tasks, system_matrices, equ
 # model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module)
 optimize_gp(model, optim_steps)
 
-test_x = torch.linspace(test_time.start, test_time.end, test_time.count)
+test_x = test_time.linspace()
 model.eval()
 likelihood.eval()
 

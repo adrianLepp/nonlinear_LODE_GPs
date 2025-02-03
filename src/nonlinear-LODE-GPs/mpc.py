@@ -136,7 +136,7 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
 
 
 def predict_reference(model:LODEGP, step_time:Time_Def, states:State_Description, x_i:np.ndarray, t_i:float, convergence:bool, EARLY_CONVERGENCE:bool=False):
-    t_reference = torch.linspace(step_time.start, step_time.end, step_time.count+1)
+    t_reference = step_time.linspace()
 
     if EARLY_CONVERGENCE and np.isclose(x_i, states.target, rtol=1e-2).all(): #, atol=1e-3
         if convergence is False:

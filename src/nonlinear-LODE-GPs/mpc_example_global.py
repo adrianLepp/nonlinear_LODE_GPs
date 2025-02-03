@@ -169,21 +169,7 @@ with gpytorch.settings.observation_nan_policy('mask'):
     model = Local_GP_Sum(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
     model.optimize(optim_steps)
 
-    if hyperparameters is not None:
-        for key, value in hyperparameters.items():
-            if hasattr(model.covar_module.model_parameters, key):
-                setattr(model.covar_module.model_parameters, key, torch.nn.Parameter(torch.tensor(value), requires_grad=False))
-            else:
-                print(f'Hyperparameter {key} not found in model')
-
-    print("\n----------------------------------------------------------------------------------\n")
-    print('Trained model parameters:')
-    named_parameters = list(model.named_parameters())
-    param_conversion = torch.nn.Softplus()
-
-    for j in range(len(named_parameters)):
-        print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
-    print("\n----------------------------------------------------------------------------------\n")
+    
 
     sim_data, ref_data, lode_data = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
 

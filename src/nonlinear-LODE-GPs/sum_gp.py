@@ -104,7 +104,7 @@ class Weighted_Sum_GP(gpytorch.models.ExactGP):
 
 
 class Local_GP_Sum(gpytorch.Module):
-    def __init__(self, train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale):
+    def __init__(self, train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=None):
         super(Local_GP_Sum, self).__init__()
 
         self.num_tasks = num_tasks
@@ -116,7 +116,9 @@ class Local_GP_Sum(gpytorch.Module):
             mean_module = Equilibrium_Mean(equilibriums[i], num_tasks)
             model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrices[i], mean_module)
 
-            w_fcts.append(Weighting_Function(centers[i], weight_lengthscale))
+            w_fcts.append(Weighting_Function(centers[i]))#, weight_lengthscale
+            w_fcts[i].initialize(length=torch.tensor(weight_lengthscale, requires_grad=False))
+            #w_fcts[i].lengthscale = weight_lengthscale
             models.append(model)
 
         self.models = ModuleList(models)

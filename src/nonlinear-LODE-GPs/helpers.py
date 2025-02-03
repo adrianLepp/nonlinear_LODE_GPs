@@ -10,6 +10,55 @@ import matplotlib.pyplot as plt
 import json
 from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config, add_reference_data
 
+class Time_Def():
+    start:float
+    end:float
+    count:int
+    step:float
+
+    def __init__(self, start, end, count=None, step=None):
+        self.start = start
+        self.end = end
+        if count is None and step is not None:
+            self.count = int(ceil((end-start)/step)) +1
+            self.step = step
+        elif count is not None and step is None:
+            self.count = count
+            self.step = (end-start)/count
+        else:
+            raise ValueError("Either count or step must be given")
+        
+    def linspace(self):
+        return torch.linspace(self.start, self.end, self.count)
+
+class State_Description():
+    equilibrium:torch.Tensor
+    init:torch.Tensor
+    target:torch.Tensor
+    min:torch.Tensor
+    max:torch.Tensor
+
+    def __init__(self, equilibrium:torch.Tensor=None, init:torch.Tensor=None, target:torch.Tensor=None,  min:torch.Tensor=None, max:torch.Tensor=None):
+        self.init = init
+
+        if equilibrium is None:
+            self.equilibrium = target
+        else:
+            self.equilibrium = equilibrium
+        if target is None:
+            self.target = equilibrium
+        else:
+            self.target = target
+        self.min = min
+        self.max = max
+
+class Data_Def():
+    def __init__(self, x,y,state_dim:int, control_dim:int):
+        self.time = x
+        self.y = y
+        self.state_dim = state_dim
+        self.control_dim = control_dim
+
 def load_system(system_name:str):
 
     match system_name:
@@ -51,21 +100,19 @@ def load_training_data(model_id:int):
     else:
         raise ValueError("No training data found")
 
-def simulate_system(system, x0, tStart, tEnd, num_data, u = None, linear=False):
-    train_x = torch.linspace(tStart, tEnd, num_data)
+def simulate_system(system, x0, time:Time_Def, u = None, linear=False):
+    ts = time.linspace()
+    
     try:
-        solution = system.get_ODEsolution(train_x)
+        solution = system.get_ODEsolution(ts)
         train_y = torch.stack(solution, -1)
     except NotImplementedError:
         #print("No analytical solution available. Use state transition function instead.")
-
-        ts = np.linspace(tStart, tEnd, num_data)
-        dt = (tEnd-tStart)/num_data
         
         if linear:
-            sol = solve_ivp(system.linear_stateTransition, [tStart, tEnd], x0, method='RK45', t_eval=ts, args=(u,dt))#, max_step=dt ,  atol = 1, rtol = 1
+            sol = solve_ivp(system.linear_stateTransition, [time.start, time.end], x0, method='RK45', t_eval=ts, args=(u,time.step))#, max_step=dt ,  atol = 1, rtol = 1
         else:
-            sol = solve_ivp(system.stateTransition, [tStart, tEnd], x0, method='RK45', t_eval=ts, args=(u,dt))#, max_step=dt ,  atol = 1, rtol = 1
+            sol = solve_ivp(system.stateTransition, [time.start, time.end], x0, method='RK45', t_eval=ts, args=(u,time.step))#, max_step=dt ,  atol = 1, rtol = 1
         
 
         x = sol.y.transpose()
@@ -80,7 +127,7 @@ def simulate_system(system, x0, tStart, tEnd, num_data, u = None, linear=False):
     except:
         print("Error in system")
 
-    return train_x, train_y
+    return ts, train_y
 
 def create_test_inputs(test_count:int, eval_step_size:int, test_start:float, test_end:float, derivatives:int):
     divider = derivatives + 1 
@@ -155,53 +202,6 @@ def equilibrium_base_change(time, states, equilibriums, changepoints, add=True):
             states[i] = states[i] + equilibriums[1]
 
     return states
-
-class Time_Def():
-    start:float
-    end:float
-    count:int
-    step:float
-
-    def __init__(self, start, end, count=None, step=None):
-        self.start = start
-        self.end = end
-        if count is None and step is not None:
-            self.count = int(ceil((end-start)/step))
-            self.step = step
-        elif count is not None and step is None:
-            self.count = count
-            self.step = (end-start)/count
-        else:
-            raise ValueError("Either count or step must be given")
-        
-
-class State_Description():
-    equilibrium:torch.Tensor
-    init:torch.Tensor
-    target:torch.Tensor
-    min:torch.Tensor
-    max:torch.Tensor
-
-    def __init__(self, equilibrium:torch.Tensor=None, init:torch.Tensor=None, target:torch.Tensor=None,  min:torch.Tensor=None, max:torch.Tensor=None):
-        self.init = init
-
-        if equilibrium is None:
-            self.equilibrium = target
-        else:
-            self.equilibrium = equilibrium
-        if target is None:
-            self.target = equilibrium
-        else:
-            self.target = target
-        self.min = min
-        self.max = max
-
-class Data_Def():
-    def __init__(self, x,y,state_dim:int, control_dim:int):
-        self.time = x
-        self.y = y
-        self.state_dim = state_dim
-        self.control_dim = control_dim
 
 def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None, equilibrium=None):
     labels = ['train', 'gp', 'sim']
@@ -329,11 +329,13 @@ def plot_weights(x, weights, title="Weighting Function"):
     plt.figure(figsize=(12, 6))
     if isinstance(weights, list):
         for i, weight in enumerate(weights):
-            plt.plot(x, weight, label=f'Weight {i}')
+            plt.plot(x, weight, label=f'Model {i+1}')
+        
+        #plt.plot(x, sum(weights), label='Sum')
         plt.legend()
     else:
         plt.plot(x, weights)
-    plt.xlabel("x")
+    plt.xlabel("t")
     plt.ylabel("Weight")
-    plt.title(title)
+    #plt.title(title)
     plt.show()

@@ -8,7 +8,7 @@ from masking import masking, create_mask
 from mean_modules import *
 from likelihoods import MultitaskGaussianLikelihoodWithMissingObs
 
-def optimize_gp(gp, training_iterations=100, verbose=True):
+def optimize_gp(gp, training_iterations=100, verbose=True, hyperparameters:dict=None):
     # Find optimal model hyperparameters
     gp.train()
     gp.likelihood.train()
@@ -18,6 +18,13 @@ def optimize_gp(gp, training_iterations=100, verbose=True):
 
     # "Loss" for GPs - the marginal log likelihood
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(gp.likelihood, gp)
+
+    if hyperparameters is not None:
+        for key, value in hyperparameters.items():
+            if hasattr(gp.covar_module.model_parameters, key):
+                setattr(gp.covar_module.model_parameters, key, torch.nn.Parameter(torch.tensor(value), requires_grad=False))
+            else:
+                print(f'Hyperparameter {key} not found in model')
     
     #print(list(self.named_parameters()))
     for i in range(training_iterations):
@@ -29,6 +36,18 @@ def optimize_gp(gp, training_iterations=100, verbose=True):
         if verbose is True:
             print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
         optimizer.step()
+
+    
+
+    print("\n----------------------------------------------------------------------------------\n")
+    print('Trained model parameters:')
+    named_parameters = list(gp.named_parameters())
+    #param_conversion = torch.nn.Softplus()
+
+    for j in range(len(named_parameters)):
+        #print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+        print(named_parameters[j][0], (named_parameters[j][1].data)) #.item()
+    print("\n----------------------------------------------------------------------------------\n")
 
     #print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
         #gp.likelihood.noise = torch.tensor(1e-8)
