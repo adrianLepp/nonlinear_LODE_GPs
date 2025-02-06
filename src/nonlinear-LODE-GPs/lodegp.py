@@ -25,6 +25,8 @@ def optimize_gp(gp, training_iterations=100, verbose=True, hyperparameters:dict=
                 setattr(gp.covar_module.model_parameters, key, torch.nn.Parameter(torch.tensor(value), requires_grad=False))
             else:
                 print(f'Hyperparameter {key} not found in model')
+
+    training_loss = []
     
     #print(list(self.named_parameters()))
     for i in range(training_iterations):
@@ -37,16 +39,18 @@ def optimize_gp(gp, training_iterations=100, verbose=True, hyperparameters:dict=
             print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
         optimizer.step()
 
+        training_loss.append(loss.item())
+
     
 
     print("\n----------------------------------------------------------------------------------\n")
     print('Trained model parameters:')
     named_parameters = list(gp.named_parameters())
-    #param_conversion = torch.nn.Softplus()
+    param_conversion = torch.nn.Softplus()
 
     for j in range(len(named_parameters)):
-        #print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
-        print(named_parameters[j][0], (named_parameters[j][1].data)) #.item()
+        print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+        # print(named_parameters[j][0], (named_parameters[j][1].data)) #.item()
     print("\n----------------------------------------------------------------------------------\n")
 
     #print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
@@ -54,6 +58,8 @@ def optimize_gp(gp, training_iterations=100, verbose=True, hyperparameters:dict=
         #gp.covar_module.model_parameters.signal_variance_3 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_3))
 
     #print(list(self.named_parameters()))
+
+    return training_loss
 
 class LODEGP_Deprecated(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood, num_tasks, A):

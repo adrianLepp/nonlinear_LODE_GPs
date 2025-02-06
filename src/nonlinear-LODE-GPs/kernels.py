@@ -31,15 +31,16 @@ torch_operations = {'mul': torch.mul, 'add': torch.add,
 DEBUG =False
 
 class LODE_Kernel(Kernel):
-        def __init__(self, A, common_terms, active_dims=None):
+        def __init__(self, A, common_terms, active_dims=None, verbose=False):
             super(LODE_Kernel, self).__init__(active_dims=active_dims)
 
             self.model_parameters = torch.nn.ParameterDict()
             #self.num_tasks = num_tasks
 
             D, U, V = A.smith_form()
-            print(f"D:{D}")
-            print(f"V:{V}")
+            if verbose:
+                print(f"D:{D}")
+                print(f"V:{V}")
             x, a, b = var("x, a, b")
             V_temp = [list(b) for b in V.rows()]
             #print(V_temp)

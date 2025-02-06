@@ -102,4 +102,16 @@ class Nonlinear_Watertank(ODE_System):
         #dx3 = 0
 
         return [dx0, dx1]#, dx3
+    
+    def linear_stateTransition(self, t, x, u, dt):
+
+        control_idx = floor(abs(t/dt-0.000000001))
+
+        u_current = u[control_idx].squeeze()
+
+        dx0 = self.A_r[0][0] * x[0] + self.A_r[0][1] * x[1]  + self.b_r[0][0] * u_current
+        dx1 = self.A_r[1][0] * x[0] + self.A_r[1][1] * x[1]  + self.b_r[1][0] * u_current
+        #dx3 = 0
+
+        return [dx0, dx1]#, dx3
         

@@ -54,12 +54,19 @@ class State_Description():
         self.max = max
 
 class Data_Def():
-    def __init__(self, x,y,state_dim:int, control_dim:int, time:Time_Def=None):
+    def __init__(self, x,y,state_dim:int, control_dim:int, time:Time_Def=None, uncertainty:dict=None):
         self.time = x
         self.y = y
         self.state_dim = state_dim
         self.control_dim = control_dim
         self.time_def = time
+        self.uncertainty = uncertainty
+
+    def to_report_data(self):
+        data = {'time': self.time}
+        for i in range(self.state_dim + self.control_dim):
+            data[f'f{i+1}'] = self.y[:,i]
+        return data
 
 def load_system(system_name:str):
 
@@ -206,7 +213,7 @@ def equilibrium_base_change(time, states, equilibriums, changepoints, add=True):
     return states
 
 def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None, equilibrium=None):
-    labels = ['train', 'gp', 'sim']
+    labels = ['train', 'gp', 'linear']
     fig, ax1 = plt.subplots()
     ax2 = ax1.twinx()
 
@@ -219,6 +226,11 @@ def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None, equilibriu
 
     for i in range(test.state_dim):
         color = f'C{i}'
+
+        if test.uncertainty is not None:
+            ax1.fill_between(test.time, test.uncertainty['lower'][:,i], test.uncertainty['upper'][:,i], alpha=0.2, color=color)
+
+
         ax1.plot(train.time, train.y[:, i], '.', color=color, label=f'x{i+1}_{labels[0]}')    
         ax1.plot(test.time, test.y[:, i], color=color, label=f'x{i+1}_{labels[1]}', alpha=0.5)
         if ref is not None:
@@ -227,9 +239,15 @@ def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None, equilibriu
         if equilibrium is not None:
             ax1.plot(t_range, eq_range[:,i], '--', label=f'x{i+1}_eq',color=color, alpha=alpha_eq)
 
+        
+
     for i in range(test.control_dim):
         idx = test.state_dim + i
         color = f'C{idx}'
+
+        if test.uncertainty is not None:
+            ax2.fill_between(test.time, test.uncertainty['lower'][:,idx], test.uncertainty['upper'][:,idx], alpha=0.2, color=color)
+
         ax2.plot(train.time, train.y[:, idx], '.', color=color, label=f'u{i+1}_{labels[1]}')
         ax2.plot(test.time, test.y[:, idx], color=color, label=f'u{i+1}_{labels[1]}', alpha=0.5)
         if ref is not None:
@@ -398,3 +416,9 @@ def save_everything(system_name:str, model_name:str, config:dict, train_data:Dat
     print(f"save model with model id {config['model_id']}")
     print(f"save data with data id {config['simulation_id']}")
     pass
+
+def downsample_data(t:torch.Tensor, y:torch.Tensor, factor=10):
+    t_redux = t[::factor]
+    y_redux = y[::factor,:]
+    
+    return t_redux, y_redux 
