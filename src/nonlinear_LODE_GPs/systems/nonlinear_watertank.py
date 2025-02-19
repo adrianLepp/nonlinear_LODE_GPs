@@ -49,6 +49,12 @@ class Nonlinear_Watertank(ODE_System):
         self.equilibrium_solution = solution
         self.A = A
         self.b = b
+
+    def get_ODEfrom_spline(self, fkt: tuple):
+        ode1 = lambda val: fkt[0].derivative(val, 1) - 1/self.param.A*(self.param._u * fkt[2](val) -self.param.c12*sqrt(2*self.param.g*(fkt[0](val)-fkt[1](val))))
+        ode2 = lambda val: fkt[1].derivative(val, 1) - 1/self.param.A*(self.param.c12*sqrt(2*self.param.g*(fkt[0](val)-fkt[1](val)))-self.param.c2R*sqrt(2*self.param.g*(fkt[1](val))))
+
+        return (ode1, ode2)
     
     def get_ODEmatrix(self, u_r_rel:float):
         #TODO: the matrices A b and Ix could surely be merged in a more elegant way

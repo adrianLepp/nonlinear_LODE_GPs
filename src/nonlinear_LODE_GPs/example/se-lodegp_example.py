@@ -108,6 +108,8 @@ with gpytorch.settings.observation_nan_policy('mask'):
         output = likelihood(model(test_x))
         lower, upper = output.confidence_region()
         
+    _, _ = get_ode_from_spline(system, output.mean, test_x)
+    
 uncertainty = {
     'lower': lower.numpy(),
     'upper': upper.numpy()

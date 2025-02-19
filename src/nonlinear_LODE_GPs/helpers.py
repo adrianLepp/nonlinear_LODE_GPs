@@ -138,17 +138,17 @@ def simulate_system(system, x0, time:Time_Def, u = None, linear=False):
 
     return ts, train_y
 
-def create_test_inputs(test_count:int, eval_step_size:int, test_start:float, test_end:float, derivatives:int):
+def create_test_inputs(test_time:Time_Def, derivatives:int):
     divider = derivatives + 1 
     #test_x = torch.linspace(test_start, test_end, test_count)
     #second_derivative=False
     #divider = 3 if second_derivative else 2
-    number_of_samples = int(test_count/divider)
-    test_x = torch.linspace(test_start, test_end, number_of_samples)
+    number_of_samples = int(test_time.count/divider)
+    test_x = torch.linspace(test_time.start, test_time.end, number_of_samples)
 
     data_list = [test_x]
     for i in range(derivatives):
-        data_list.append(test_x + torch.tensor(i*eval_step_size))
+        data_list.append(test_x + torch.tensor(i*test_time.step))
 
     # if second_derivative:
     #     test_x = torch.cat([test_x, test_x+torch.tensor(eval_step_size), test_x+torch.tensor(2*eval_step_size)])
@@ -158,22 +158,23 @@ def create_test_inputs(test_count:int, eval_step_size:int, test_start:float, tes
     test_x = torch.cat(data_list).sort()[0]
     return test_x
 
-def get_ode_from_spline(model, system, output, test_x):
+def get_ode_from_spline(system:ODE_System, estimate:torch.Tensor, test_x:torch.Tensor):
     fkt = list()
-    for dimension in range(model.covar_module.kernelsize):
-        output_channel = output.mean[:, dimension]
-        fkt.append(spline([(t, y) for t, y in zip(test_x, output_channel)]))
+    for i in range(system.dimension):
+        # output_channel = estimate[:, dimension]
+        fkt.append(spline([(t, y) for t, y in zip(test_x, estimate[:, i])]))
 
     ode = system.get_ODEfrom_spline(fkt)
-    ode_test_vals = test_x
 
-    ode_error_list = [[] for _ in range(model.covar_module.ode_count)]
-    for val in ode_test_vals:
-        for i in range(model.covar_module.ode_count):
+    ode_error_list = [[] for _ in range(system.state_dimension)]
+    for val in test_x:
+        for i in range(system.state_dimension):
             #ode_error_list[i].append(np.abs(globals()[f"ode{i+1}"](val)))
             ode_error_list[i].append(np.abs(ode[i](val)))
 
+    print('------------------------------------------')
     print('ODE error', np.mean(ode_error_list, axis=1))
+    print('------------------------------------------')
     return ode, ode_error_list
 
 def calc_finite_differences(sample, point_step_size, skip=False, number_of_samples=0):

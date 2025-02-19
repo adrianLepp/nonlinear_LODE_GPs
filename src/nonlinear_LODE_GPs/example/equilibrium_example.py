@@ -1,22 +1,22 @@
 import gpytorch 
-from sage.all import *
-import sage
+# from sage.all import *
+# import sage
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
 from sage.calculus.var import var
-from kernels import *
+from nonlinear_LODE_GPs.kernels import *
 import torch
 from result_reporter.latex_exporter import plot_loss, plot_error, plot_states, save_plot_to_pdf
 from sklearn.metrics import mean_squared_error
 
 # ----------------------------------------------------------------------------
-from  lodegp import  optimize_gp, LODEGP
-from helpers import *
-from mean_modules import Equilibrium_Mean
+from nonlinear_LODE_GPs.lodegp import  optimize_gp, LODEGP
+from nonlinear_LODE_GPs.helpers import *
+from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = True
+SAVE = False
 
 
 system_name = "nonlinear_watertank"
@@ -24,6 +24,7 @@ system_name = "nonlinear_watertank"
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 t  = 100
+optim_steps = 300
 downsample = 10
 sim_time = Time_Def(0, t, step=0.1)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
@@ -87,12 +88,12 @@ with gpytorch.settings.observation_nan_policy('mask'):
     mean_module = Equilibrium_Mean(equilibrium, num_tasks)
     model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module) #system.state_var, system.control_var
 
-    training_loss = optimize_gp(model,300)
+    training_loss = optimize_gp(model,optim_steps)
 
     # %% test
 
-    # test_x = create_test_inputs(test_time.count, test_time.step, test_time.start, test_time.end, 1)
-    test_x = test_time.linspace()
+    #test_x = create_test_inputs(test_time, 1)
+    test_x = test_time.linspace() #TODO
 
     model.eval()
     likelihood.eval()
@@ -101,6 +102,8 @@ with gpytorch.settings.observation_nan_policy('mask'):
         output = likelihood(model(test_x))
         lower, upper = output.confidence_region()
         
+    _, _ = get_ode_from_spline(system, output.mean, test_x)
+
 uncertainty = {
     'lower': lower.numpy(),
     'upper': upper.numpy()
@@ -110,12 +113,11 @@ x0_e = x0 - np.array(equilibrium)
 ref_x, ref_y= simulate_system(system, x0_e[0:system.state_dimension], sim_time, u-equilibrium[-1], linear=True)
 ref_data = Data_Def(ref_x.numpy(), ref_y.numpy() + np.array(equilibrium), system.state_dimension, system.control_dimension, sim_time)
 
+_, _ = get_ode_from_spline(system, ref_data.y, ref_data.time)
+
 
 test_data = Data_Def(test_x.numpy(), output.mean.numpy(), system.state_dimension, system.control_dimension, test_time, uncertainty)
 train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension, train_time)
-
-from result_reporter.type import Data
-
 
 
 error_gp = Data_Def(test_data.time, abs(test_data.y - _train_y.numpy()), system.state_dimension, system.control_dimension) 
