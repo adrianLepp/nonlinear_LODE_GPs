@@ -4,8 +4,8 @@ import sage
 from sage.calculus.var import var
 import torch
 import numpy as np
-from systems import ODE_System
-from systems.linearize import solve_for_equilibrium, get_equilibrium_equations
+from nonlinear_LODE_GPs.systems import ODE_System
+from nonlinear_LODE_GPs.systems.linearize import solve_for_equilibrium, get_equilibrium_equations
 
 
 # R = QQ['x, x1, x2, x3, u']

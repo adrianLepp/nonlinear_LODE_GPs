@@ -4,7 +4,7 @@ import sage
 from sage.calculus.var import var
 import torch
 import numpy as np
-from systems import ODE_System
+from nonlinear_LODE_GPs.systems import ODE_System
 
 R = QQ['x']; (x,) = R._first_ngens(1)
 

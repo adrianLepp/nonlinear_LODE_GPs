@@ -8,10 +8,10 @@ from result_reporter.latex_exporter import plot_loss, plot_error, plot_states, s
 from sklearn.metrics import mean_squared_error
 
 # ----------------------------------------------------------------------------
-from nonlinear-LODE-Gps.kernels import *
-from lodegp import  optimize_gp, LODEGP
-from helpers import *
-from mean_modules import Equilibrium_Mean
+from nonlinear_LODE_GPs.kernels import *
+from nonlinear_LODE_GPs.lodegp import  optimize_gp, LODEGP
+from nonlinear_LODE_GPs.helpers import *
+from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
@@ -24,6 +24,7 @@ system_name = "nonlinear_watertank"
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 t  = 100
+optim_steps = 300
 downsample = 10
 sim_time = Time_Def(0, t, step=0.1)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
@@ -85,9 +86,15 @@ with gpytorch.settings.observation_nan_policy('mask'):
     #likelihood.raw_task_noises.requires_grad = False
 
     mean_module = Equilibrium_Mean(equilibrium, num_tasks)
-    model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module) #system.state_var, system.control_var
+    model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module,additive_se=True) #system.state_var, system.control_var
 
-    training_loss = optimize_gp(model,300)
+    training_loss = optimize_gp(model,optim_steps)
+
+    print("\n----------------------------------------------------------------------------------\n")
+    print('Outputscale of kernels:')
+    for i in range(len(model.covar_module.kernels)):
+        print(f'{i} {type(model.covar_module.kernels[i].base_kernel).__name__}: {model.covar_module.kernels[i].outputscale.data}')
+    print("\n----------------------------------------------------------------------------------\n")
 
     # %% test
 

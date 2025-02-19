@@ -1,10 +1,10 @@
 import gpytorch 
 # from sage.all import *
-from kernels import *
+from nonlinear_LODE_GPs.kernels import *
 import torch
-from mean_modules import *
-from weighting import *
-from lodegp import *
+from nonlinear_LODE_GPs.mean_modules import *
+from nonlinear_LODE_GPs.weighting import *
+from nonlinear_LODE_GPs.lodegp import *
 
 import matplotlib.pyplot as plt 
 import seaborn as sns

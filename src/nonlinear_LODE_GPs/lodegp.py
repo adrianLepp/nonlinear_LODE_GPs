@@ -1,12 +1,12 @@
 import gpytorch 
 from sage.all import *
 from sage.calculus.var import var
-from kernels import *
+from nonlinear_LODE_GPs.kernels import *
 import pprint
 import torch
-from masking import masking, create_mask
-from mean_modules import *
-from likelihoods import MultitaskGaussianLikelihoodWithMissingObs
+from nonlinear_LODE_GPs.masking import masking, create_mask
+from nonlinear_LODE_GPs.mean_modules import *
+from nonlinear_LODE_GPs.likelihoods import MultitaskGaussianLikelihoodWithMissingObs
 
 def optimize_gp(gp, training_iterations=100, verbose=True, hyperparameters:dict=None):
     # Find optimal model hyperparameters
@@ -99,7 +99,16 @@ class LODEGP(gpytorch.models.ExactGP):
         }
 
         if additive_se:
-            self.covar_module = gpytorch.kernels.ScaleKernel(LODE_Kernel(A, self.common_terms)) + gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+            # self.covar_module = gpytorch.kernels.ScaleKernel(
+            #     LODE_Kernel(A, self.common_terms),
+            #     batch_shape=torch.Size([num_tasks])
+            # ) + gpytorch.kernels.ScaleKernel(
+            #     gpytorch.kernels.RBFKernel(batch_shape=torch.Size([num_tasks])),
+            #     batch_shape=torch.Size([num_tasks])
+            # )
+            self.covar_module =gpytorch.kernels.ScaleKernel(gpytorch.kernels.MultitaskKernel(
+                gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=0
+            )) + gpytorch.kernels.ScaleKernel(LODE_Kernel(A, self.common_terms))
         else:
             self.covar_module = LODE_Kernel(A, self.common_terms)
 

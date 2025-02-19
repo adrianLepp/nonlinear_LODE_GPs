@@ -1,21 +1,21 @@
 import gpytorch.constraints
 import gpytorch.constraints
-from helpers import *
+from nonlinear_LODE_GPs.helpers import *
 import gpytorch 
 from sage.all import *
 import sage
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
 from sage.calculus.var import var
-from kernels import *
+from nonlinear_LODE_GPs.kernels import *
 import torch
 import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------------------------
-from  lodegp import LODEGP, optimize_gp
-from helpers import *
-from likelihoods import *
-from masking import *
-from mean_modules import Equilibrium_Mean
+from nonlinear_LODE_GPs.lodegp import LODEGP, optimize_gp
+from nonlinear_LODE_GPs.helpers import *
+from nonlinear_LODE_GPs.likelihoods import *
+from nonlinear_LODE_GPs.masking import *
+from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 
 def update_gp(model:LODEGP, train_x:torch.Tensor, train_y:torch.Tensor, manual_noise:torch.Tensor, optim_steps:int=0):
     if isinstance(model.likelihood, MultitaskGaussianLikelihoodWithMissingObs):

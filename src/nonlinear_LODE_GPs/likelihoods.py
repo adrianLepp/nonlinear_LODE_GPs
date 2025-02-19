@@ -6,7 +6,7 @@ from linear_operator.operators import DiagLinearOperator, ConstantDiagLinearOper
 #from gpytorch.operators import ConstantDiagLinearOperator
 import torch
 import gpytorch
-from noise_models import MaskedManualNoise, ManualNoise
+from nonlinear_LODE_GPs.noise_models import MaskedManualNoise, ManualNoise
 from gpytorch.distributions import MultivariateNormal
 from typing import Any
 import gpytorch.settings as settings

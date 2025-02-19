@@ -5,7 +5,7 @@ from sage.calculus.var import var
 import torch
 import numpy as np
 from scipy.integrate import solve_ivp
-from systems import *
+from nonlinear_LODE_GPs.systems import *
 import matplotlib.pyplot as plt
 import json
 from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config, add_reference_data
