@@ -3,10 +3,10 @@ import torch
 import gpytorch
 from gpytorch.kernels.kernel import sq_dist, dist
 
-class Weighting_Function(gpytorch.Module):#gpytorch.Module
+class Gaussian_Weight(gpytorch.Module):#gpytorch.Module
     #def __init__(self, center:torch.Tensor, lengthscale_prior:torch.Tensor):
     def __init__(self, center:torch.Tensor, length_prior=None, length_constraint=None,):
-        super(Weighting_Function, self).__init__()
+        super(Gaussian_Weight, self).__init__()
         self.center = center
         #self.lengthscale = torch.nn.Parameter(torch.ones(1)*(44194))
         self.lengthscale = length_prior
@@ -14,15 +14,16 @@ class Weighting_Function(gpytorch.Module):#gpytorch.Module
 
         self.register_parameter(
             #name='raw_length', parameter=torch.nn.Parameter(torch.zeros(*self.batch_shape, 1, 1))
-            name='raw_length', parameter=torch.nn.Parameter(torch.zeros(1, 1))
+            name='raw_length', parameter=torch.nn.Parameter(torch.ones(1, 1))
         )
         
         # set the parameter constraint to be positive, when nothing is specified
-        if length_constraint is None:
-            length_constraint = gpytorch.constraints.Positive()
+        # if length_constraint is None:
+        #     length_constraint = gpytorch.constraints.Positive()
 
         # register the constraint
-        self.register_constraint("raw_length", length_constraint)
+        if length_constraint is not None:
+            self.register_constraint("raw_length", length_constraint)
         
         # set the parameter prior, see
         # https://docs.gpytorch.ai/en/latest/module.html#gpytorch.Module.register_prior
@@ -36,6 +37,9 @@ class Weighting_Function(gpytorch.Module):#gpytorch.Module
 
     @property
     def length(self):
+        if hasattr(self, "raw_length_constraint"):
+            return self.raw_length_constraint.transform(self.raw_length)
+        return self.raw_length
         # when accessing the parameter, apply the constraint transform
         return self.raw_length_constraint.transform(self.raw_length)
 
@@ -47,7 +51,10 @@ class Weighting_Function(gpytorch.Module):#gpytorch.Module
         if not torch.is_tensor(value):
             value = torch.as_tensor(value).to(self.raw_length)
         # when setting the paramater, transform the actual value to a raw one by applying the inverse transform
-        self.initialize(raw_length=self.raw_length_constraint.inverse_transform(value))
+        if hasattr(self, "raw_length_constraint"):
+            self.initialize(raw_length=self.raw_length_constraint.inverse_transform(value))
+        else:
+            self.initialize(raw_length=value)
 
     def forward(self, x):
         center = self.center
@@ -78,3 +85,32 @@ class Weighting_Function(gpytorch.Module):#gpytorch.Module
         dist_func = sq_dist if square_dist else dist
         return dist_func(x1, x2, x1_eq_x2)
     
+
+class Constant_Weight(gpytorch.Module):#gpytorch.Module
+    def __init__(self):
+        super(Constant_Weight, self).__init__()
+        self.register_parameter(
+            name='raw_weight', parameter=torch.nn.Parameter(torch.ones(1, 1))
+        )
+        
+        self.register_constraint("raw_weight", gpytorch.constraints.Positive())
+
+    @property
+    def weight(self):
+        return self.raw_weight_constraint.transform(self.raw_weight)
+        
+
+    @weight.setter
+    def weight(self, value):
+        return self._set_weight(value)
+
+    def _set_weight(self, value):
+        if not torch.is_tensor(value):
+            value = torch.as_tensor(value).to(self.raw_weight)
+        # when setting the paramater, transform the actual value to a raw one by applying the inverse transform
+        
+        self.initialize(raw_weight=self.raw_weight_constraint.inverse_transform(value))
+        
+
+    def forward(self, x):
+        return torch.ones((x.shape[0],1)) * self.weight

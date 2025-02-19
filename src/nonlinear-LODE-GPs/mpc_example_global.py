@@ -11,7 +11,7 @@ from likelihoods import *
 from masking import *
 from mpc import mpc_algorithm, create_setpoints
 from sum_gp import Local_GP_Sum
-from weighting import Weighting_Function
+from weighting import Gaussian_Weight
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
@@ -94,7 +94,7 @@ state_start = equilibriums[start]
 state_end = torch.tensor([0.3, 0.3, torch.nan])#torch.nan 1e-5
 
 l=1
-w_func = Weighting_Function(centers[0],l)
+w_func = Gaussian_Weight(centers[0])
 d = w_func.covar_dist(centers[1], w_func.center, square_dist=True)
 l = d*torch.sqrt(torch.tensor(2))/8
 

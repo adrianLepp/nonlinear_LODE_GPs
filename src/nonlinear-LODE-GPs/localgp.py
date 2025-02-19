@@ -33,7 +33,7 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             kernels.append(LODE_Kernel(A_list[i], self.common_terms))
             #_kernels.append(Local_Kernel(LODE_Kernel(A_list[i], self.common_terms), num_tasks, center_list[i], weight_lengthscale, output_distance))
             means.append(Equilibrium_Mean(equilibrium_list[i], num_tasks))
-            w_functions.append(Weighting_Function(center_list[i], weight_lengthscale))
+            w_functions.append(Gaussian_Weight(center_list[i], weight_lengthscale))
 
         #self.mean_module = Global_Mean(means, num_tasks,output_distance)
         self.mean_module = Global_Mean_2(means, w_functions, num_tasks,output_distance)
@@ -70,7 +70,7 @@ def plot_weights(x, weights, title="Weighting Function"):
 class Local_Mean(Equilibrium_Mean):
     def __init__(self, mean_values:torch.Tensor, num_tasks:int, center:torch.Tensor, weight_lengthscale:torch.Tensor, output_distance=False):
         super(Local_Mean, self).__init__(mean_values, num_tasks)
-        self.weighting_function = Weighting_Function(center, weight_lengthscale)
+        self.weighting_function = Gaussian_Weight(center, weight_lengthscale)
         self.output_distance = output_distance
 
     def forward(self, x):
@@ -114,7 +114,7 @@ class Global_Mean(Mean):
         return mean / weight
     
 class Global_Mean_2(Mean):
-    def __init__(self, local_means:List[Mean], weight_functions:List[Weighting_Function], num_tasks:int, output_distance:bool=False):
+    def __init__(self, local_means:List[Mean], weight_functions:List[Gaussian_Weight], num_tasks:int, output_distance:bool=False):
         super(Global_Mean_2, self).__init__()
         self.num_tasks = num_tasks
         self.local_means = ModuleList(local_means)
@@ -142,7 +142,7 @@ class Local_Kernel(Kernel):
     def __init__(self, kernel:Kernel, num_tasks:int, center:torch.Tensor, weight_lengthscale:torch.Tensor, output_distance=False):
         super(Local_Kernel, self).__init__(active_dims=None)
         self.kernel = kernel
-        self.weighting_function = Weighting_Function(center, weight_lengthscale)
+        self.weighting_function = Gaussian_Weight(center, weight_lengthscale)
         self.num_tasks = num_tasks
         self.output_distance = output_distance
     
@@ -226,7 +226,7 @@ class Global_Kernel(Kernel):
 
         
 class Global_Kernel_2(Kernel):
-    def __init__(self, local_kernels:List[Kernel], weight_functions:List[Weighting_Function], num_tasks, output_distance=False):
+    def __init__(self, local_kernels:List[Kernel], weight_functions:List[Gaussian_Weight], num_tasks, output_distance=False):
         super(Global_Kernel_2, self).__init__(active_dims=None)
         self.num_tasks = num_tasks
         self.local_kernels = ModuleList(local_kernels)

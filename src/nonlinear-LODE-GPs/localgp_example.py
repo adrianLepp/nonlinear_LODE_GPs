@@ -72,7 +72,7 @@ else:
 l  = 1
 #l = 2.65e-3
 #l = 44194
-w_func = Weighting_Function(centers[0],l)
+w_func = Gaussian_Weight(centers[0],l)
 d = w_func.covar_dist(centers[1], w_func.center, square_dist=True)
 l = d*torch.sqrt(torch.tensor(2))/8
 # print(l)
