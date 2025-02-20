@@ -168,4 +168,14 @@ if SAVE:
     save_plot_to_pdf(fig_loss, f'loss_plot_{SIM_ID}')
     save_plot_to_pdf(fig_error, f'error_plot_{SIM_ID}')
     save_plot_to_pdf(fig_results, f'results_plot_{SIM_ID}')
-    save_everything(system_name, model_path, config, train_data, test_data, sim_data=ref_data, states=states, model_dict=model.state_dict())
+    save_everything(
+        system_name, 
+        model_path, 
+        config, 
+        train_data, 
+        test_data, 
+        sim_data=ref_data, 
+        init_state=states.init.numpy(), 
+        system_param=states.equilibrium.numpy(), 
+        model_dict=model.state_dict()
+    )

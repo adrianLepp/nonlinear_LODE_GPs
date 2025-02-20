@@ -6,15 +6,15 @@ import gpytorch
 # import sage
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
 from sage.calculus.var import var
-from kernels import *
-from mean_modules import *
+from nonlinear_LODE_GPs.kernels import *
+from nonlinear_LODE_GPs.mean_modules import *
 import torch
 
 # ----------------------------------------------------------------------------
-from  lodegp import *
-from helpers import *
-from weighting import Gaussian_Weight
-from sum_gp import Local_GP_Sum
+from nonlinear_LODE_GPs.lodegp import *
+from nonlinear_LODE_GPs.helpers import *
+from nonlinear_LODE_GPs.weighting import Gaussian_Weight
+from nonlinear_LODE_GPs.sum_gp import Local_GP_Sum
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
@@ -135,4 +135,14 @@ states = State_Description(
 if SAVE:
     config['model_id'] = MODEL_ID
     config['simulation_id'] = SIM_ID
-    save_everything(system_name, model_path, config, train_data, test_data, sim_data=None, states=states, model_dict=model.state_dict())
+    save_everything(
+        system_name, 
+        model_path, 
+        config, 
+        train_data, 
+        test_data, 
+        sim_data=None, 
+        init_state=states.init.numpy(), 
+        system_param=states.equilibrium.numpy(), 
+        model_dict=model.state_dict()
+    )

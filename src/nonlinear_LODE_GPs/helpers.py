@@ -68,21 +68,21 @@ class Data_Def():
             data[f'f{i+1}'] = self.y[:,i]
         return data
 
-def load_system(system_name:str):
+def load_system(system_name:str, **kwargs):
 
     match system_name:
         case "bipendulum":
-            system = Bipendulum()
+            system = Bipendulum(**kwargs)
         case "threetank":
-            system = ThreeTank()
+            system = ThreeTank(**kwargs)
         case "system1":
-            system = System1()
+            system = System1(**kwargs)
         case "inverted_pendulum":
-            system = Inverted_Pendulum()
+            system = Inverted_Pendulum(**kwargs)#FIXME
         case "nonlinear_threetank":
-            system = Nonlinear_ThreeTank()
+            system = Nonlinear_ThreeTank(**kwargs)
         case "nonlinear_watertank":
-            system = Nonlinear_Watertank()
+            system = Nonlinear_Watertank(**kwargs)
         case _:
             raise ValueError(f"System {system_name} not found")
         
@@ -401,13 +401,25 @@ def save_config(config:dict, config_file:str=default_config):
         json.dump(config, f)
 
 
-def save_everything(system_name:str, model_name:str, config:dict, train_data:Data_Def, gp_data:Data_Def, sim_data:Data_Def, states:State_Description, model_dict:dict, metrics:list[float]=[]):
+def save_everything(
+        system_name:str, 
+        model_name:str, 
+        config:dict, 
+        train_data:Data_Def, 
+        gp_data:Data_Def, 
+        sim_data:Data_Def, 
+        # states:State_Description, 
+        init_state:np.ndarray,
+        system_param:np.ndarray,
+        model_dict:dict, 
+        metrics:list[float]=[]
+    ):
     torch.save(model_dict, model_name)
 
-    add_modelConfig(config['model_id'], system_name, states.init.numpy(), states.equilibrium.numpy(), train_data.time_def.start, train_data.time_def.end, train_data.time_def.step)
+    add_modelConfig(config['model_id'], system_name, init_state, system_param, train_data.time_def.start, train_data.time_def.end, train_data.time_def.step)
     add_training_data(config['model_id'], train_data.time, train_data.y)
 
-    add_simulationConfig(config['simulation_id'], config['model_id'], system_name, states.init.numpy(), states.equilibrium.numpy(), gp_data.time_def.start, gp_data.time_def.end, gp_data.time_def.step, metrics)
+    add_simulationConfig(config['simulation_id'], config['model_id'], system_name, init_state, system_param, gp_data.time_def.start, gp_data.time_def.end, gp_data.time_def.step, metrics)
     add_simulation_data(config['simulation_id'], gp_data.time, gp_data.y)
 
     if sim_data is not None:
