@@ -110,7 +110,7 @@ class LODEGP(gpytorch.models.ExactGP):
                 gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=0
             )) + gpytorch.kernels.ScaleKernel(LODE_Kernel(A, self.common_terms))
         else:
-            self.covar_module = LODE_Kernel(A, self.common_terms)
+            self.covar_module = LODE_Kernel(A, self.common_terms, verbose=True)
 
     def forward(self, X):
         if not torch.equal(X, self.train_inputs[0]):

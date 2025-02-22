@@ -431,7 +431,7 @@ def save_everything(
     pass
 
 def downsample_data(t:torch.Tensor, y:torch.Tensor, factor=10):
-    t_redux = t[::factor]
-    y_redux = y[::factor,:]
+    t_redux = t.clone()[::factor]
+    y_redux = y.clone()[::factor,:]
     
     return t_redux, y_redux 

@@ -16,7 +16,7 @@ from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = True
+SAVE = False
 
 
 system_name = "inverted_pendulum"
@@ -59,34 +59,40 @@ u[0]=1
 _train_x, _train_y= simulate_system(system, x_0[0:system.state_dimension], sim_time, u)
 train_x, train_y = downsample_data(_train_x, _train_y, downsample)
 
-for i in range(len(train_x)):
-    train_y[i,-1] = system.get_latent_control(u[i].squeeze(), train_y[i,0:2])
+# for i in range(len(train_x)):
+#     train_y[i,-1] = system.get_latent_control(u[i].squeeze(), train_y[i,0:2])
+
+for i in range(len(_train_x)):
+    _train_y[i,-1] = system.get_latent_control(u[i].squeeze(), _train_y[i,0:2])
+
+train_y[:,-1] = torch.nan #torch.tensor(np.nan)
 
 ref_x, ref_y= simulate_system(system, x_0[0:system.state_dimension], sim_time, u, linear=True)
 for i in range(len(ref_x)):
     ref_y[i,-1] = system.get_latent_control(u[i].squeeze(), ref_y[i,0:2])
 
 
+with gpytorch.settings.observation_nan_policy('mask'):
 
-likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(
-        num_tasks,
-        has_global_noise=False, 
-        has_task_noise=True,
-        noise_constraint=gpytorch.constraints.GreaterThan(torch.tensor(1e-15))
-)
+    likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(
+            num_tasks,
+            has_global_noise=False, 
+            has_task_noise=True,
+            noise_constraint=gpytorch.constraints.GreaterThan(torch.tensor(1e-15))
+    )
 
-model = LODEGP(train_x, train_y, likelihood, num_tasks, ode_matrix)
+    model = LODEGP(train_x, train_y, likelihood, num_tasks, ode_matrix)
 
-training_loss = optimize_gp(model,optim_steps)
+    training_loss = optimize_gp(model,optim_steps)
 
-test_x = test_time.linspace() #TODO
+    test_x = test_time.linspace() #TODO
 
-model.eval()
-likelihood.eval()
+    model.eval()
+    likelihood.eval()
 
-with torch.no_grad():
-    output = likelihood(model(test_x))
-    lower, upper = output.confidence_region()
+    with torch.no_grad():
+        output = likelihood(model(test_x))
+        lower, upper = output.confidence_region()
         
 # _, _ = get_ode_from_spline(system, output.mean, test_x)
 
@@ -100,16 +106,19 @@ ref_x, ref_y= simulate_system(system, x_0[0:system.state_dimension], sim_time, u
 test_data = Data_Def(test_x.numpy(), output.mean.numpy(), system.state_dimension, system.control_dimension, test_time)#, uncertainty
 ref_data = Data_Def(ref_x.numpy(), system.rad_to_deg(ref_y.numpy()), system.state_dimension, system.control_dimension, sim_time)
 train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension, train_time)
+_train_data = Data_Def(_train_x.numpy(), _train_y.numpy(), system.state_dimension, system.control_dimension, sim_time)
 
 
-for i in range(len(test_data.time)):
-    test_data.y[i,-1] = system.get_control_from_latent(test_data.y[i,-1].squeeze(), test_data.y[i,0:2])
+# for i in range(len(test_data.time)):
+#     test_data.y[i,-1] = system.get_control_from_latent(test_data.y[i,-1].squeeze(), test_data.y[i,0:2])
 
-for i in range(len(train_data.time)):
-    train_data.y[i,-1] = system.get_control_from_latent(train_data.y[i,-1].squeeze(), train_data.y[i,0:2])
+# for i in range(len(train_data.time)):
+#     train_data.y[i,-1] = system.get_control_from_latent(train_data.y[i,-1].squeeze(), train_data.y[i,0:2])
 
 test_data.y = system.rad_to_deg(test_data.y)
 train_data.y = system.rad_to_deg(train_data.y)
+_train_data.y = system.rad_to_deg(_train_data.y)
+
 # for i in range(len(ref_data.time)):
 #     ref_data.y[i,-1] = system.get_control_from_latent(ref_data.y[i,-1].squeeze(), ref_data.y[i,0:2])
 
@@ -118,7 +127,7 @@ train_data.y = system.rad_to_deg(train_data.y)
 
 
 
-fig_results = plot_states(train_data, test_data, ref_data,header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'])
+fig_results = plot_states(train_data, test_data, _train_data,header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'])
 
 plt.show()
 
