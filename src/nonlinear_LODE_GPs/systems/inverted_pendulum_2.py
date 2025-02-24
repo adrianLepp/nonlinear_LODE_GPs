@@ -69,6 +69,17 @@ class Inverted_Pendulum(ODE_System):
      
     def stateTransition(self, t, x, u=None, dt=None, model=None):
         u_current = self.get_control_from_list(t, dt, u)
+        
+        y_ref = 0
+        # u_current = self.get_control_from_latent(y_ref,x)
+
+        dx0 = x[1]
+        dx1 = -self.param.g/self.param.l*np.cos(x[0]) - self.param.d*x[1] - 1/self.param.m * u_current
+        return [dx0, dx1]
+    
+    def stateTransition_2(self, t, x, y_ref_control=None, dt=None, model=None): #FIXME how do you call me
+        y_ref = self.get_control_from_list(t, dt, y_ref_control)
+        u_current = self.get_control_from_latent(y_ref,x).squeeze()
 
         dx0 = x[1]
         dx1 = -self.param.g/self.param.l*np.cos(x[0]) - self.param.d*x[1] - 1/self.param.m * u_current

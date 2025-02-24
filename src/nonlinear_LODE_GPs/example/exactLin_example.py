@@ -30,11 +30,11 @@ sim_time = Time_Def(0, t, step=0.01)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
 test_time = Time_Def(0, t-0, step=0.01)
 
-a0 = 0
-a1 = 0
+a0 = 1
+a1 = 1
 v = 1
 ccf_param = [a0, a1, v]
-system = load_system(system_name, a0=0, a1=0, v=1)
+system = load_system(system_name, a0=a0, a1=a1, v=1)
 
 num_tasks = system.dimension
 
@@ -51,7 +51,7 @@ states = State_Description(init=torch.tensor(x_0))
 
 #u = np.linspace(u_rel * system.param.u, u_rel * system.param.u, train_time.count)
 u = np.ones((sim_time.count,1)) * u
-u[0]=1
+u[0]=0
 
 # u[500::] = 1.5
 
@@ -65,6 +65,7 @@ train_x, train_y = downsample_data(_train_x, _train_y, downsample)
 for i in range(len(_train_x)):
     _train_y[i,-1] = system.get_latent_control(u[i].squeeze(), _train_y[i,0:2])
 
+'''
 train_y[:,-1] = torch.nan #torch.tensor(np.nan)
 
 ref_x, ref_y= simulate_system(system, x_0[0:system.state_dimension], sim_time, u, linear=True)
@@ -93,17 +94,16 @@ with gpytorch.settings.observation_nan_policy('mask'):
     with torch.no_grad():
         output = likelihood(model(test_x))
         lower, upper = output.confidence_region()
-        
-# _, _ = get_ode_from_spline(system, output.mean, test_x)
 
 uncertainty = {
     'lower': lower.numpy(),
     'upper': upper.numpy()
 }
+'''
 
 ref_x, ref_y= simulate_system(system, x_0[0:system.state_dimension], sim_time, u, linear=True)
 
-test_data = Data_Def(test_x.numpy(), output.mean.numpy(), system.state_dimension, system.control_dimension, test_time)#, uncertainty
+# test_data = Data_Def(test_x.numpy(), output.mean.numpy(), system.state_dimension, system.control_dimension, test_time)#, uncertainty
 ref_data = Data_Def(ref_x.numpy(), system.rad_to_deg(ref_y.numpy()), system.state_dimension, system.control_dimension, sim_time)
 train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension, train_time)
 _train_data = Data_Def(_train_x.numpy(), _train_y.numpy(), system.state_dimension, system.control_dimension, sim_time)
@@ -115,7 +115,7 @@ _train_data = Data_Def(_train_x.numpy(), _train_y.numpy(), system.state_dimensio
 # for i in range(len(train_data.time)):
 #     train_data.y[i,-1] = system.get_control_from_latent(train_data.y[i,-1].squeeze(), train_data.y[i,0:2])
 
-test_data.y = system.rad_to_deg(test_data.y)
+#test_data.y = system.rad_to_deg(test_data.y)
 train_data.y = system.rad_to_deg(train_data.y)
 _train_data.y = system.rad_to_deg(_train_data.y)
 
@@ -123,11 +123,17 @@ _train_data.y = system.rad_to_deg(_train_data.y)
 #     ref_data.y[i,-1] = system.get_control_from_latent(ref_data.y[i,-1].squeeze(), ref_data.y[i,0:2])
 
 
+# plt.figure()
+# plt.plot(_train_data.time, _train_data.y[:,-1], label='Control')
 
 
 
-
-fig_results = plot_states(train_data, test_data, _train_data,header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'])
+fig_results = plot_states(
+    [ _train_data],
+    data_names = ['Sim'], 
+    header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
+    title = f'Inverted Pendulum Control: a0: {a0}, a1: {a1}, v: {v}'
+    )
 
 plt.show()
 

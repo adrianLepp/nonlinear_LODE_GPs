@@ -126,7 +126,7 @@ _train_data.y = system.rad_to_deg(_train_data.y)
 #     ref_data.y[i,-1] = system.get_control_from_latent(ref_data.y[i,-1].squeeze(), ref_data.y[i,0:2])
 
 
-fig_results = plot_states(train_data, test_data, _train_data,header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'])
+# fig_results = plot_states(train_data, test_data, _train_data,header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'])
 
 
 # plt.show()
@@ -170,6 +170,7 @@ with torch.no_grad(), gpytorch.settings.fast_pred_var(): # and gpytorch.settings
 
 
 y_ref = np.zeros_like(_train_x)
+y_pred_2 = alpha_output.mean.detach().numpy() + beta_output.mean.detach().numpy() * _u_train_x[:,-1].detach().numpy()
 
 for i in range(len(_train_x)):
     y_ref[i] = system.get_latent_control(u[i].squeeze(), _train_y[i,0:2].numpy())
@@ -181,6 +182,7 @@ plt.plot(_train_x.detach().numpy(), u_output.mean.detach().numpy(), label = r'$y
 plt.plot(_train_x.detach().numpy(), _u_train_x[:,-1].detach().numpy(), label = 'u')
 plt.plot(_train_x.detach().numpy(), alpha_output.mean.detach().numpy(), '--', label = r'$\alpha_{pred}(x)$')
 plt.plot(_train_x.detach().numpy(), beta_output.mean.detach().numpy(), '--', label = r'$\beta_{pred}(x)$')
+plt.plot(_train_x.detach().numpy(), y_pred_2, label = r'$y_{pred2}(x,u)$')
 plt.xlabel('Time [s]')
 plt.ylabel('Force [N]')
 plt.title('Control estimation inverted pendulum')
