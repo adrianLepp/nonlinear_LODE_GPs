@@ -13,6 +13,7 @@ from nonlinear_LODE_GPs.lodegp import  optimize_gp, LODEGP
 from nonlinear_LODE_GPs.helpers import *
 from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 from nonlinear_LODE_GPs.gp import GP, Linearizing_Control
+from mpl_toolkits.mplot3d import Axes3D
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
@@ -25,7 +26,7 @@ system_name = "inverted_pendulum"
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 t  = 20
-optim_steps = 100
+optim_steps = 300
 downsample = 10
 sim_time = Time_Def(0, t, step=0.01)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
@@ -44,8 +45,8 @@ ode_matrix  = system.get_ODEmatrix()
 
 #D, U, V = system_matrix.smith_form()
 
-x_0 = np.array([ np.pi/2 , 0 ,0]) #+ 0.1
-u = 1
+x_0 = np.array([ np.pi/2 , 0 ,0]) #+ 0.1 TODO
+u = 1 #TODO
 
 states = State_Description(init=torch.tensor(x_0))
 
@@ -54,7 +55,8 @@ states = State_Description(init=torch.tensor(x_0))
 u = np.ones((sim_time.count,1)) * u
 # u[0]=1
 
-# u[500::] = 1.5
+u[0:100] = 0
+u[1000::] = 0
 
 
 _train_x, _train_y= simulate_system(system, x_0[0:system.state_dimension], sim_time, u)
@@ -124,7 +126,8 @@ _train_data.y = system.rad_to_deg(_train_data.y)
 #     ref_data.y[i,-1] = system.get_control_from_latent(ref_data.y[i,-1].squeeze(), ref_data.y[i,0:2])
 
 
-# fig_results = plot_states(train_data, test_data, _train_data,header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'])
+fig_results = plot_states(train_data, test_data, _train_data,header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'])
+
 
 # plt.show()
 
@@ -141,40 +144,71 @@ control_gp = Linearizing_Control(u_train_x, u_train_y, u_likelihood)
 model.train()
 likelihood.train()
 
+
+
+# control_gp.b_covar_module.raw_outputscale = torch.nn.Parameter(torch.tensor(0.0, requires_grad = false))
+# control_gp.beta.covar_module.initialize(outputscale = torch.tensor(0.0, requires_grad = false))
+control_gp.alpha.mean_module.initialize(constant = torch.tensor(0.0, requires_grad = false))
+
+# control_gp.beta.covar_module.initialize(raw_outputscale = torch.tensor(0.0, requires_grad = false))
+control_gp.alpha.mean_module.initialize(raw_constant = torch.tensor(0.0, requires_grad = false))
+#This works
+control_gp.alpha.mean_module.raw_constant.requires_grad = False 
+# control_gp.beta.covar_module.raw_outputscale.requires_grad = False
 training_loss = optimize_gp(control_gp,optim_steps)
 
-# Use the adam optimizer
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
-
-# # "Loss" for GPs - the marginal log likelihood
-# mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
-# training_iter = 100
-# for i in range(training_iter):
-#     # Zero gradients from previous iteration
-#     optimizer.zero_grad()
-#     # Output from model
-#     output = model(train_x)
-#     # Calc loss and backprop gradients
-#     loss = -mll(output, train_y)
-#     loss.backward()
-#     print('Iter %d/%d - Loss: %.3f   lengthscale: %.3f   noise: %.3f' % (
-#         i + 1, training_iter, loss.item(),
-#         model.covar_module.base_kernel.lengthscale.item(),
-#         model.likelihood.noise.item()
-#     ))
-#     optimizer.step()
 
 control_gp.eval()
 u_likelihood.eval()
 
 with torch.no_grad(), gpytorch.settings.fast_pred_var(): # and gpytorch.settings.debug(False):
         u_output = u_likelihood(control_gp(_u_train_x))
+
+        alpha_output = control_gp.alpha(_u_train_x[:,:-1])
+        beta_output = control_gp.beta(_u_train_x[:,:-1])
         # u_lower, u_upper = u_output.confidence_region()
 
+
+y_ref = np.zeros_like(_train_x)
+
+for i in range(len(_train_x)):
+    y_ref[i] = system.get_latent_control(u[i].squeeze(), _train_y[i,0:2].numpy())
+
+plt.rcParams['text.usetex'] = True
 plt.figure()
-# plt.plot(_train_x.detach().numpy(), _u_train_x[:,-1].detach().numpy())
-plt.plot(_train_x.detach().numpy(), u_output.mean.detach().numpy())
+plt.plot(_train_x.detach().numpy(), y_ref, '--', label = r'$y_{ref}(x,u)$')
+plt.plot(_train_x.detach().numpy(), u_output.mean.detach().numpy(), label = r'$y_{pred}(x,u)$')
+plt.plot(_train_x.detach().numpy(), _u_train_x[:,-1].detach().numpy(), label = 'u')
+plt.plot(_train_x.detach().numpy(), alpha_output.mean.detach().numpy(), '--', label = r'$\alpha_{pred}(x)$')
+plt.plot(_train_x.detach().numpy(), beta_output.mean.detach().numpy(), '--', label = r'$\beta_{pred}(x)$')
+plt.xlabel('Time [s]')
+plt.ylabel('Force [N]')
+plt.title('Control estimation inverted pendulum')
+plt.legend()
+# plt.show()
+
+
+# plt.figure()
+# plt.plot(_train_y[:,0].numpy(), y_ref, '.' , label = 'x_1')
+# plt.plot(_train_y[:,1].numpy(), y_ref, '.', label = 'x_2')
+
+
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+
+# x = _train_y[:, 0].detach().numpy()
+# y = _train_y[:, 1].detach().numpy()
+# z = u_output.mean.detach().numpy()
+
+# ax.plot_trisurf(x, y, z, cmap='viridis', edgecolor='none')
+
+# ax.set_xlabel('State 1')
+# ax.set_ylabel('State 2')
+# ax.set_zlabel('u_output.mean')
+
 plt.show()
+
+# save_plot_to_pdf(fig_results, f'results_plot_{SIM_ID}')
 
 if SAVE:
     config['model_id'] = MODEL_ID
