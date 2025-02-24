@@ -33,7 +33,11 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             kernels.append(LODE_Kernel(A_list[i], self.common_terms))
             #_kernels.append(Local_Kernel(LODE_Kernel(A_list[i], self.common_terms), num_tasks, center_list[i], weight_lengthscale, output_distance))
             means.append(Equilibrium_Mean(equilibrium_list[i], num_tasks))
-            w_functions.append(Gaussian_Weight(center_list[i], weight_lengthscale))
+            # w_fcts[i].initialize(length=torch.tensor(weight_lengthscale, requires_grad=True))#TODO
+            
+            w_functions.append(Gaussian_Weight(center_list[i])) #TODO  Constant_Weight()
+            w_functions[i].length = weight_lengthscale
+            # w_functions[i].initialize(weight=torch.tensor(1/len(A_list), requires_grad=False))
 
         #self.mean_module = Global_Mean(means, num_tasks,output_distance)
         self.mean_module = Global_Mean_2(means, w_functions, num_tasks,output_distance)
@@ -58,10 +62,10 @@ def plot_weights(x, weights, title="Weighting Function"):
     plt.figure(figsize=(12, 6))
     if isinstance(weights, list):
         for i, weight in enumerate(weights):
-            plt.plot(x, weight, label=f'Weight {i}')
+            plt.plot(x, weight.detach().numpy(), label=f'Weight {i}')
         plt.legend()
     else:
-        plt.plot(x, weights)
+        plt.plot(x, weights.detach().numpy())
     plt.xlabel("x")
     plt.ylabel("Weight")
     plt.title(title)
@@ -255,14 +259,18 @@ class Global_Kernel_2(Kernel):
                 distance_measure_1 = out[:length_1]
                 distance_measure_2 = out[-length_2:]
 
-        weight_matrices_1 = [torch.tile(weighting_function(distance_measure_1),(self.num_tasks,1)) for weighting_function in self.weight_functions]
-        weight_matrices_2 = [torch.tile(weighting_function(distance_measure_2),(self.num_tasks,1)) for weighting_function in self.weight_functions]
-
         covariances = [local_kernel(x1, x2, diag=False, **params) for local_kernel in self.local_kernels]
+        
+        # weight_matrices_1 = [torch.tile(weighting_function(distance_measure_1),(self.num_tasks,1)) for weighting_function in self.weight_functions]
+        # weight_matrices_2 = [torch.tile(weighting_function(distance_measure_2),(self.num_tasks,1)) for weighting_function in self.weight_functions]
+        weights_extended_1 = [weight_function(distance_measure_1).repeat_interleave(self.num_tasks).unsqueeze(1) for weight_function in self.weight_functions]
+        weights_extended_2 = [weight_function(distance_measure_2).repeat_interleave(self.num_tasks).unsqueeze(0) for weight_function in self.weight_functions] 
 
+        # weight = sum((weighting_function(distance_measure_1) * weighting_function(distance_measure_2).t())  for weighting_function in self.weight_functions)
+        # weight_matrix = torch.tile(weight,(self.num_tasks,self.num_tasks))
+        weight_matrix = sum(weights_extended_1[i] * weights_extended_1[i]  for i in range(len(weights_extended_1)))
 
-        weight = sum((weighting_function(distance_measure_1) * weighting_function(distance_measure_2).t())  for weighting_function in self.weight_functions)
-        weight_matrix = torch.tile(weight,(self.num_tasks,self.num_tasks))
-        covar = sum(weight_matrices_1[i] * covariances[i] * weight_matrices_2[i].t()  for i in range(len(covariances))) / weight_matrix
+        # covar = sum(weight_matrices_1[i] * covariances[i] * weight_matrices_2[i].t()  for i in range(len(covariances))) / weight_matrix
+        covar = sum(weights_extended_1[i] * covariances[i] * weights_extended_2[i]  for i in range(len(covariances))) / weight_matrix
 
         return covar
