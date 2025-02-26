@@ -24,15 +24,23 @@ device = 'cpu'
 
 system_name = "nonlinear_watertank"
 
-optim_steps = 100
+optim_steps = 300
 
 u_0 = 0.2
 u_1 = 0.25
 u_2 = 0.3
-controls = [u_0, u_1, u_2]#, u_1
-
+u_ctrl = 0.5
+controls = [
+    0.1,
+    # 0.25,
+    0.2,
+    # 0.25, 
+    0.3,
+    # 0.4,
+    # 0.5,
+    ]
 t0 = 0.0
-t1 = 200.0
+t1 = 100.0
 timestamps = [0.0, 500.0, t1]
 
 output_distance = True
@@ -68,7 +76,7 @@ l.requires_grad = False
 #l = 1000
 # l = torch.tensor([[176776.6953]])
 
-u = np.ones((sim_time.count,1)) * 0.4 * system.param.u
+u = np.ones((sim_time.count,1)) * u_ctrl * system.param.u
 
 _train_x, _train_y= simulate_system(system, equilibriums[0][0:system.state_dimension], sim_time, u)
 train_x, train_y = downsample_data(_train_x, _train_y, downsample)
@@ -102,6 +110,7 @@ model = Sum_LODEGP(
     centers, 
     weight_lengthscale=l, 
     output_distance=output_distance,
+    additive_kernel=True,
     pre_model=pre_model
     )
 

@@ -37,6 +37,7 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             center_list:List[torch.Tensor], 
             weight_lengthscale:torch.Tensor, 
             output_distance=False,
+            additive_kernel=False,
             pre_model=None,
         ):
         if output_distance is True and pre_model is None:
@@ -61,10 +62,7 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
         # _kernels = []
         w_functions = []
         for i in range(len(A_list)):
-            #means.append(Local_Mean(equilibrium_list[i], num_tasks, center_list[i], weight_lengthscale, output_distance))
-            #kernels.append(Local_Kernel(LODE_Kernel(A_list[i], self.common_terms), num_tasks, center_list[i], weight_lengthscale, output_distance))
             kernels.append(LODE_Kernel(A_list[i], self.common_terms))
-            #_kernels.append(Local_Kernel(LODE_Kernel(A_list[i], self.common_terms), num_tasks, center_list[i], weight_lengthscale, output_distance))
             means.append(Equilibrium_Mean(equilibrium_list[i], num_tasks))
             # w_fcts[i].initialize(length=torch.tensor(weight_lengthscale, requires_grad=True))#TODO
             
@@ -73,10 +71,8 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             w_functions[i].initialize(raw_length=torch.tensor(weight_lengthscale, requires_grad=False))
             # w_functions[i].initialize(weight=torch.tensor(1/len(A_list), requires_grad=False))
 
-        #self.mean_module = Global_Mean(means, num_tasks,output_distance)
-        self.mean_module = Global_Mean_2(means, w_functions, num_tasks,output_distance)
-        # self.covar_module = Global_Kernel(_kernels, num_tasks,output_distance)
-        self.covar_module = Global_Kernel_2(kernels, w_functions, num_tasks,output_distance)
+        self.mean_module = Global_Mean(means, w_functions, num_tasks,output_distance)
+        self.covar_module = Global_Kernel(kernels, w_functions, num_tasks,output_distance, additive_kernel)
 
     def forward(self, X):
         if not torch.equal(X, self.train_inputs[0]):
@@ -95,56 +91,10 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
         # if DEBUG:
         #     plot_weights(X, mean_x[:,0], 'Global Mean')
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)
-
-class Local_Mean(Equilibrium_Mean):
-    def __init__(self, mean_values:torch.Tensor, num_tasks:int, center:torch.Tensor, weight_lengthscale:torch.Tensor, output_distance=False):
-        super(Local_Mean, self).__init__(mean_values, num_tasks)
-        self.weighting_function = Gaussian_Weight(center, weight_lengthscale)
-        self.output_distance = output_distance
-
-    def forward(self, x):
-        if self.output_distance is False:
-            return self.weighting_function(x) * super().forward(x)
-        else:
-            output = super().forward(x)
-            return self.weighting_function(output) * output
-
-class Global_Mean(Mean):
-    def __init__(self, local_means:List[Local_Mean], num_tasks:int, output_distance:bool=False):
-        super(Global_Mean, self).__init__()
-        self.num_tasks = num_tasks
-        self.local_means = ModuleList(local_means)
-        self.output_distance = output_distance
-
-
-    def forward(self, x:torch.Tensor):
-
-        mean = sum(local_mean(x) for local_mean in self.local_means)
-        distance_measure =  mean.clone() if self.output_distance else x.clone()  # FIXME: this is wrong
-
-        weight = sum(local_mean.weighting_function(distance_measure) for local_mean in self.local_means)
-
-        # mean = torch.zeros_like(x)
-        # if DEBUG:
-        #     local_means = []
-        #     weights = []
-        #     for local_mean in self.local_means:
-        #         local_means.append(local_mean(x))
-                
-        #     distance_measure =  mean.clone() if self.output_distance else x.clone()
-        #     for local_mean in self.local_means:
-        #         weights.append(local_mean.weighting_function(distance_measure))
-                
-                
-        #     plot_weights(x, weights)
-        #     plot_weights(x, [local_means[0][:,0],local_means[1][:,0]], 'Local Means')
-        #     plot_weights(x, weight, 'Sum of Weights')
-
-        return mean / weight
     
-class Global_Mean_2(Mean):
+class Global_Mean(Mean):
     def __init__(self, local_means:List[Mean], weight_functions:List[Gaussian_Weight], num_tasks:int, output_distance:bool=False):
-        super(Global_Mean_2, self).__init__()
+        super(Global_Mean, self).__init__()
         self.num_tasks = num_tasks
         self.local_means = ModuleList(local_means)
         self.weight_functions = ModuleList(weight_functions)
@@ -166,102 +116,18 @@ class Global_Mean_2(Mean):
             plot_weights(x, sum(weight_list), 'Sum of Weights')
 
         return mean
-
-    
-class Local_Kernel(Kernel):
-    def __init__(self, kernel:Kernel, num_tasks:int, center:torch.Tensor, weight_lengthscale:torch.Tensor, output_distance=False):
-        super(Local_Kernel, self).__init__(active_dims=None)
-        self.kernel = kernel
-        self.weighting_function = Gaussian_Weight(center, weight_lengthscale)
-        self.num_tasks = num_tasks
-        self.output_distance = output_distance
-    
-    def num_outputs_per_input(self, x1, x2):
-        """
-        Given `n` data points `x1` and `m` datapoints `x2`, this multitask
-        kernel returns an `(n*num_tasks) x (m*num_tasks)` covariance matrix.
-        """
-        return self.num_tasks
-
-    def forward(self, x1, x2, diag=False, **params):
-        if self.output_distance is False:
-            weight_matrix_1 = torch.tile(self.weighting_function(x1),(self.num_tasks,1))
-            weight_matrix_2 = torch.tile(self.weighting_function(x2),(self.num_tasks,1))
-        else:
-            out = params["out"]
-            x1_eq_x2 = torch.equal(x1, x2)
-            if (x1_eq_x2):
-                out_1 = out_2 = out
-            else:
-                length_1 = x1.size(0)
-                length_2 = x2.size(0)
-                out_1 = out[:length_1]
-                out_2 = out[-length_2:]
-
-            weight_matrix_1 = torch.tile(self.weighting_function(out_1),(self.num_tasks,1))
-            weight_matrix_2 = torch.tile(self.weighting_function(out_2),(self.num_tasks,1))
-
-        return weight_matrix_1 * self.kernel(x1,x2, diag, **params) * weight_matrix_2.t()   
-        
 class Global_Kernel(Kernel):
-    def __init__(self, local_kernels:List[Local_Kernel], num_tasks, output_distance=False):
+    def __init__(self, local_kernels:List[Kernel], weight_functions:List[Gaussian_Weight], num_tasks, output_distance=False, additive_kernel=False):
         super(Global_Kernel, self).__init__(active_dims=None)
-        self.num_tasks = num_tasks
-        self.local_kernels = ModuleList(local_kernels)
-        self.output_distance = output_distance
-
-    def num_outputs_per_input(self, x1, x2):
-        """
-        Given `n` data points `x1` and `m` datapoints `x2`, this multitask
-        kernel returns an `(n*num_tasks) x (m*num_tasks)` covariance matrix.
-        """
-        return self.num_tasks
-
-    def forward(self, x1, x2, diag=False, **params):
-        if self.output_distance is False:
-            weight = sum((local_kernel.weighting_function(x1) * local_kernel.weighting_function(x2).t())  for local_kernel in self.local_kernels)
-            covar = sum(local_kernel(x1, x2, diag=False, **params) for local_kernel in self.local_kernels)
-        else:
-            out = params["out"]
-            x1_eq_x2 = torch.equal(x1, x2)
-            if (x1_eq_x2):
-                out_1 = out_2 = out
-            else:
-                length_1 = x1.size(0)
-                length_2 = x2.size(0)
-                out_1 = out[:length_1]
-                out_2 = out[-length_2:]
-
-                if DEBUG:
-                    
-                    weights_1 = []    
-                    weights_2 = []    
-                    #
-                    #  distance_measure =  mean.clone() if self.output_distance else x1.clone()
-                    for local_kern in self.local_kernels:
-                        weights_1.append(local_kern.weighting_function(out_1))
-                        weights_2.append(local_kern.weighting_function(out_2))
-                        
-                    plot_weights(x1, weights_1)
-                    plot_weights(x2, weights_2)
-                    #plot_weights(x1, weight, 'Sum of Weights')
-
-
-            weight = sum((local_kernel.weighting_function(out_1) * local_kernel.weighting_function(out_2).t())  for local_kernel in self.local_kernels)
-            covar = sum(local_kernel(x1, x2, diag=False, **params) for local_kernel in self.local_kernels) #, out_1=out_1, out_2=out_2,
-
-        weight_matrix = torch.tile(weight,(self.num_tasks,self.num_tasks))
-
-        return covar / weight_matrix
-
-        
-class Global_Kernel_2(Kernel):
-    def __init__(self, local_kernels:List[Kernel], weight_functions:List[Gaussian_Weight], num_tasks, output_distance=False):
-        super(Global_Kernel_2, self).__init__(active_dims=None)
         self.num_tasks = num_tasks
         self.local_kernels = ModuleList(local_kernels)
         self.weight_functions = ModuleList(weight_functions)
         self.output_distance = output_distance
+
+        if additive_kernel:
+            self.additive_kernel = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MultitaskKernel(
+                    gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=0
+                ))
 
     def num_outputs_per_input(self, x1, x2):
         """
@@ -294,9 +160,11 @@ class Global_Kernel_2(Kernel):
 
         # weight = sum((weighting_function(distance_measure_1) * weighting_function(distance_measure_2).t())  for weighting_function in self.weight_functions)
         # weight_matrix = torch.tile(weight,(self.num_tasks,self.num_tasks))
-        weight_matrix = sum(weights_extended_1[i] * weights_extended_1[i]  for i in range(len(weights_extended_1)))
+        weight_matrix = sum(weights_extended_1[i] * weights_extended_2[i]  for i in range(len(weights_extended_1)))
 
         # covar = sum(weight_matrices_1[i] * covariances[i] * weight_matrices_2[i].t()  for i in range(len(covariances))) / weight_matrix
-        covar = sum(weights_extended_1[i] * covariances[i] * weights_extended_2[i]  for i in range(len(covariances))) / weight_matrix
+        covar = sum(weights_extended_1[i] * covariances[i] * weights_extended_2[i]  for i in range(len(covariances))) / weight_matrix 
+        if self.additive_kernel is not None:
+            covar = covar + self.additive_kernel(x1, x2, diag=False, **params)
 
         return covar

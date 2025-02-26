@@ -103,13 +103,6 @@ class LODEGP(gpytorch.models.ExactGP):
         }
 
         if additive_se:
-            # self.covar_module = gpytorch.kernels.ScaleKernel(
-            #     LODE_Kernel(A, self.common_terms),
-            #     batch_shape=torch.Size([num_tasks])
-            # ) + gpytorch.kernels.ScaleKernel(
-            #     gpytorch.kernels.RBFKernel(batch_shape=torch.Size([num_tasks])),
-            #     batch_shape=torch.Size([num_tasks])
-            # )
             self.covar_module =gpytorch.kernels.ScaleKernel(gpytorch.kernels.MultitaskKernel(
                 gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=0
             )) + gpytorch.kernels.ScaleKernel(LODE_Kernel(A, self.common_terms))
