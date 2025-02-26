@@ -58,10 +58,13 @@ class Gaussian_Weight(gpytorch.Module):#gpytorch.Module
 
     def forward(self, x:gpytorch.distributions.Distribution):
         center = self.center
+
+        if isinstance(x, gpytorch.distributions.Distribution):
+            x = x.mean
         
         # x_ = x.div(self.lengthscale)
         # center_ = center.div(self.lengthscale)
-        unitless_sq_dist = self.covar_dist(x.mean, center, square_dist=True)
+        unitless_sq_dist = self.covar_dist(x, center, square_dist=True)
         # clone because inplace operations will mess with what's saved for backward
         covar_mat = unitless_sq_dist.div_(-2.0*self.length).exp_()
         return covar_mat
@@ -113,7 +116,9 @@ class Constant_Weight(gpytorch.Module):#gpytorch.Module
         
 
     def forward(self, x:gpytorch.distributions.Distribution):
-        return torch.ones((x.mean.shape[0],1)) * self.weight #FIXME
+        if isinstance(x, gpytorch.distributions.Distribution):
+            x = x.mean
+        return torch.ones((x.shape[0],1)) * self.weight #FIXME
     
 class KL_Divergence_Weight(gpytorch.Module):
     def __init__(self, center:torch.Tensor, length_prior=None, length_constraint=None,):
@@ -157,6 +162,8 @@ class KL_Divergence_Weight(gpytorch.Module):
             self.initialize(raw_length=value)
 
     def forward(self, dist:gpytorch.distributions.Distribution):
+        if not isinstance(dist, gpytorch.distributions.Distribution):
+            raise ValueError('Input must be a gpytorch distribution')
         center = self.center[:,:-1] #FIXME
         N = dist.mean.shape[0]
         num_tasks = 3
