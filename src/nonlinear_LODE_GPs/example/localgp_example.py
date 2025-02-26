@@ -15,7 +15,7 @@ from result_reporter.latex_exporter import plot_states
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.lodegp import optimize_gp
 from nonlinear_LODE_GPs.helpers import *
-from nonlinear_LODE_GPs.weighting import Gaussian_Weight
+from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight
 from nonlinear_LODE_GPs.localgp import Sum_LODEGP
 from nonlinear_LODE_GPs.gp import MultitaskGPModel, BatchIndependentMultitaskGPModel
 
@@ -111,7 +111,8 @@ model = Sum_LODEGP(
     weight_lengthscale=l, 
     output_distance=output_distance,
     additive_kernel=True,
-    pre_model=pre_model
+    pre_model=pre_model,
+    Weight_Model=Gaussian_Weight
     )
 
 

@@ -39,6 +39,7 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             output_distance=False,
             additive_kernel=False,
             pre_model=None,
+            Weight_Model=Gaussian_Weight
         ):
         if output_distance is True and pre_model is None:
             raise ValueError("Output distance is True but no pre_model is given.")
@@ -66,7 +67,7 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             means.append(Equilibrium_Mean(equilibrium_list[i], num_tasks))
             # w_fcts[i].initialize(length=torch.tensor(weight_lengthscale, requires_grad=True))#TODO
             
-            w_functions.append(Gaussian_Weight(center_list[i])) #TODO  Constant_Weight()
+            w_functions.append(Weight_Model(center_list[i])) #TODO  Constant_Weight()
             w_functions[i].length = weight_lengthscale
             w_functions[i].initialize(raw_length=torch.tensor(weight_lengthscale, requires_grad=False))
             # w_functions[i].initialize(weight=torch.tensor(1/len(A_list), requires_grad=False))
@@ -82,7 +83,7 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
         with torch.no_grad():
             self.pre_model.eval()
             self.pre_model.likelihood.eval()
-            pre_estimate = self.pre_model.estimate(X) if self.output_distance else None
+            pre_estimate = self.pre_model(X) if self.output_distance else None
 
         mean_x = self.mean_module(X, out=pre_estimate)
         covar_x = self.covar_module(X, out=pre_estimate, common_terms=self.common_terms)

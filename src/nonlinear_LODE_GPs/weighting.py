@@ -118,11 +118,12 @@ class Constant_Weight(gpytorch.Module):#gpytorch.Module
     def forward(self, x:gpytorch.distributions.Distribution):
         if isinstance(x, gpytorch.distributions.Distribution):
             x = x.mean
-        return torch.ones((x.shape[0],1)) * self.weight #FIXME
+        return torch.ones((x.shape[0],1)) * self.weight
     
 class KL_Divergence_Weight(gpytorch.Module):
     def __init__(self, center:torch.Tensor, length_prior=None, length_constraint=None,):
         super(KL_Divergence_Weight, self).__init__()
+        self.ignore_control = True #FIXME
         self.center = center
         self.alpha = 0.5 #TODO This should be learned
 
@@ -161,23 +162,33 @@ class KL_Divergence_Weight(gpytorch.Module):
         else:
             self.initialize(raw_length=value)
 
-    def forward(self, dist:gpytorch.distributions.Distribution):
-        if not isinstance(dist, gpytorch.distributions.Distribution):
-            raise ValueError('Input must be a gpytorch distribution')
-        center = self.center[:,:-1] #FIXME
+    def forward_without_control(self, dist:gpytorch.distributions.Distribution):
+        center = self.center[:,:-1] 
         N = dist.mean.shape[0]
         num_tasks = 3
         reduced_covar = dist.covariance_matrix.reshape(N,num_tasks,N,num_tasks)[:,:-1,:,:-1].reshape(N*(num_tasks-1),N*(num_tasks-1))
         reduced_mean = dist.mean[:,:-1]
         reduced_dist = gpytorch.distributions.MultitaskMultivariateNormal(reduced_mean, reduced_covar)
-
-        # center_dist = torch.distributions.MultivariateNormal(center[0], torch.eye(center.shape[1]))
-        #center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center.tile(N,1), dist.covariance_matrix)
         center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center.tile(N,1), reduced_covar)
-
-        # divergence = torch.tensor([torch.distributions.kl_divergence(dist[i,:], center_dist[i,:]) for i in range(N)])
         divergence = torch.tensor([torch.distributions.kl_divergence(reduced_dist[i,:], center_dist[i,:]) for i in range(N)])
+        weight = 1 / (self.alpha* divergence + 1).unsqueeze(1)
+        return weight
 
+    def forward(self, dist:gpytorch.distributions.Distribution):
+        if not isinstance(dist, gpytorch.distributions.Distribution):
+            raise ValueError('Input must be a gpytorch distribution')
+        
+        if self.ignore_control:
+            return self.forward_without_control(dist)
+        
+        center = self.center
+        N = dist.mean.shape[0]
+
+        # center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center, torch.eye(center.shape[1])/1000)
+        # divergence = torch.tensor([torch.distributions.kl_divergence(dist[i,:], center_dist) for i in range(N)])
+
+        center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center.tile(N,1), dist.covariance_matrix)
+        divergence = torch.tensor([torch.distributions.kl_divergence(dist[i,:], center_dist[i,:]) for i in range(N)])
         # weight = torch.exp(-divergence/self.length).transpose(0,1)
         weight = 1 / (self.alpha* divergence + 1).unsqueeze(1)
         return weight
