@@ -55,8 +55,9 @@ train_x_1, train_y_1 = downsample_data(_train_x_1, _train_y_1, downsample)
 
 train_data_0 = Data_Def(train_x_0.numpy(), train_y_0.numpy(), system.state_dimension, system.control_dimension, train_time)
 train_data_1 = Data_Def(train_x_1.numpy(), train_y_1.numpy(), system.state_dimension, system.control_dimension, train_time)
-train_data_0.y = system.rad_to_deg(train_data_0.y)
-train_data_1.y = system.rad_to_deg(train_data_1.y)
+
+# train_data_0.y = system.rad_to_deg(train_data_0.y)
+# train_data_1.y = system.rad_to_deg(train_data_1.y) FIXME
 
 plot_states(
     [train_data_0, train_data_1],
@@ -197,8 +198,8 @@ def beta(x):
     return control_gp.beta(torch.tensor(x).unsqueeze(0)).mean.detach().numpy()
 
 
-a0 = 1
-a1 = 1
+a0 = 2
+a1 = 3
 v = 1
 system_2 = load_system(system_name, a0=a0, a1=a1, v=1)
 system_2.alpha = alpha
@@ -227,8 +228,8 @@ for i in range(len(ts)):
 
 control_data = Data_Def(ts.numpy(), control_y.numpy(), system.state_dimension, system.control_dimension, sim_time)
 
-control_data.y = system.rad_to_deg(control_data.y)
-control_data.y = system.rad_to_deg(control_data.y)
+# control_data.y = system.rad_to_deg(control_data.y)
+# control_data.y = system.rad_to_deg(control_data.y) FIXME
 
 fig_results = plot_states(
     [ control_data],

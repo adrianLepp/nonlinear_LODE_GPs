@@ -13,7 +13,7 @@ import torch
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.lodegp import *
 from nonlinear_LODE_GPs.helpers import *
-from nonlinear_LODE_GPs.weighting import Gaussian_Weight
+from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight
 from nonlinear_LODE_GPs.sum_gp import Local_GP_Sum
 
 torch.set_default_dtype(torch.float64)
@@ -33,8 +33,8 @@ equilibrium_controls = [
     0.1, 
     0.2, 
     0.3, 
-    0.4, 
-    0.5,
+    # 0.4, 
+    # 0.5,
 ]
 
 u_ctrl = 1
@@ -44,20 +44,11 @@ x0 = torch.tensor([0.0, 0.0])
 t0 = 0.0
 t1 = 50.0
 
-train_time = Time_Def(
-    t0, 
-    t1, 
-    step=1
-)
+downsample = 10
+sim_time = Time_Def(t0, t1, step=0.1)
+train_time = Time_Def(t0, t1, step=sim_time.step*downsample)
+test_time = Time_Def(t0, t1, step=0.1)
 
-test_delta = 0
-
-
-test_time = Time_Def(
-    t0 + test_delta, 
-    t1 - test_delta, 
-    step=0.1
-)
 
 system = load_system(system_name)
 num_tasks = system.dimension
@@ -73,25 +64,30 @@ for i in range(len(equilibrium_controls)):
 
 #l = 44194
 w_func = Gaussian_Weight(centers[0])
-d = w_func.covar_dist(centers[1], w_func.center, square_dist=True)
+d = w_func.covar_dist(centers[-1], w_func.center, square_dist=True)
 l = d*torch.sqrt(torch.tensor(2))/8
 
-l = l*4
+# l = l*4
 
-u = np.linspace(u_ctrl * system.param.u, u_ctrl * system.param.u, train_time.count,axis=-1)
+u = np.ones((sim_time.count,1)) * u_ctrl * system.param.u
 
 
-train_x, train_y= simulate_system(system, x0, train_time, u)
+_train_x, _train_y= simulate_system(system, x0, sim_time, u)
+train_x, train_y = downsample_data(_train_x, _train_y, downsample)
 
 likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
-#model = Weighted_Sum_GP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
-model = Local_GP_Sum(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)#, 
+model = Local_GP_Sum(
+    train_x, 
+    train_y, 
+    likelihood, 
+    num_tasks, 
+    system_matrices, 
+    equilibriums, 
+    centers,
+    Gaussian_Weight, 
+    weight_lengthscale=l)#, 
 model._optimize(optim_steps_single)
-model.optimize(optim_steps, verbose=True)
-
-# mean_module = Equilibrium_Mean(states.equilibrium, num_tasks)
-# model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module)
-#optimize_gp(model, optim_steps)
+# model.optimize(optim_steps, verbose=True)
 
 test_x = test_time.linspace()
 model.eval()
@@ -99,18 +95,18 @@ likelihood.eval()
 
 
 #output = model(test_x)
-with torch.no_grad() and gpytorch.settings.debug(False):
-    output = likelihood(model(test_x))
-    estimate = output.mean
-# with torch.no_grad():
-#     estimate, cov, weights = model.predict(test_x)
+# with torch.no_grad() and gpytorch.settings.debug(False):
+#     output = likelihood(model(test_x))
+#     estimate = output.mean
+with torch.no_grad():
+    estimate, cov, weights = model.predict(test_x)
 
 
 train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
 test_data = Data_Def(test_x.numpy(), estimate.detach().numpy(), system.state_dimension, system.control_dimension, test_time)
 
-plot_results(train_data, test_data)#,, equilibrium=equilibriums[4] 
-# plot_weights(test_x, weights, title="Weighting Function")
+plot_results(train_data, test_data)
+plot_weights(test_x, weights, title="Weighting Function")
 
 
 if local_predictions:
@@ -125,7 +121,7 @@ if local_predictions:
 
 
 states = State_Description(
-    equilibrium=equilibriums[4],
+    equilibrium=equilibriums[-1],
     # equilibrium=torch.stack(equilibriums), 
     init=x0, 
     min=None, max=None)

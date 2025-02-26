@@ -10,11 +10,44 @@ from nonlinear_LODE_GPs.lodegp import *
 
 DEBUG = False
 
+import matplotlib.pyplot as plt
+def plot_weights(x, weights, title="Weighting Function"):
+    plt.figure(figsize=(12, 6))
+    if isinstance(weights, list):
+        for i, weight in enumerate(weights):
+            plt.plot(x, weight.detach().numpy(), label=f'Weight {i}')
+        plt.legend()
+    else:
+        plt.plot(x, weights.detach().numpy())
+    plt.xlabel("x")
+    plt.ylabel("Weight")
+    plt.title(title)
+    plt.show()
+
 
 class Sum_LODEGP(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, num_tasks:int, A_list:List, equilibrium_list:List[torch.Tensor], center_list:List[torch.Tensor], weight_lengthscale:torch.Tensor, output_distance=False):
-        self.num_tasks = num_tasks
+    def __init__(
+            self, 
+            train_x:torch.Tensor, 
+            train_y:torch.Tensor, 
+            likelihood:gpytorch.likelihoods.Likelihood, 
+            num_tasks:int, 
+            A_list:List, 
+            equilibrium_list:List[torch.Tensor], 
+            center_list:List[torch.Tensor], 
+            weight_lengthscale:torch.Tensor, 
+            output_distance=False,
+            pre_model=None,
+        ):
+        if output_distance is True and pre_model is None:
+            raise ValueError("Output distance is True but no pre_model is given.")
         super(Sum_LODEGP, self).__init__(train_x, train_y, likelihood)
+
+        self.num_tasks = num_tasks
+        self.pre_model = pre_model
+        for p in self.pre_model.parameters():
+            p.requires_grad = False
+        self.output_distance = output_distance 
         
         self.common_terms = {
             "t_diff" : train_x-train_x.t(),
@@ -37,6 +70,7 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             
             w_functions.append(Gaussian_Weight(center_list[i])) #TODO  Constant_Weight()
             w_functions[i].length = weight_lengthscale
+            w_functions[i].initialize(raw_length=torch.tensor(weight_lengthscale, requires_grad=False))
             # w_functions[i].initialize(weight=torch.tensor(1/len(A_list), requires_grad=False))
 
         #self.mean_module = Global_Mean(means, num_tasks,output_distance)
@@ -49,27 +83,18 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             self.common_terms["t_diff"] = X-X.t()
             self.common_terms["t_sum"] = X+X.t()
 
-        mean_x = self.mean_module(X)
-        covar_x = self.covar_module(X, out=mean_x, common_terms=self.common_terms)
+        with torch.no_grad():
+            self.pre_model.eval()
+            self.pre_model.likelihood.eval()
+            pre_estimate = self.pre_model.estimate(X) if self.output_distance else None
+
+        mean_x = self.mean_module(X, out=pre_estimate)
+        covar_x = self.covar_module(X, out=pre_estimate, common_terms=self.common_terms)
 
         # if X % 10 == 0:
         # if DEBUG:
         #     plot_weights(X, mean_x[:,0], 'Global Mean')
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)
-    
-import matplotlib.pyplot as plt
-def plot_weights(x, weights, title="Weighting Function"):
-    plt.figure(figsize=(12, 6))
-    if isinstance(weights, list):
-        for i, weight in enumerate(weights):
-            plt.plot(x, weight.detach().numpy(), label=f'Weight {i}')
-        plt.legend()
-    else:
-        plt.plot(x, weights.detach().numpy())
-    plt.xlabel("x")
-    plt.ylabel("Weight")
-    plt.title(title)
-    plt.show()
 
 class Local_Mean(Equilibrium_Mean):
     def __init__(self, mean_values:torch.Tensor, num_tasks:int, center:torch.Tensor, weight_lengthscale:torch.Tensor, output_distance=False):
@@ -125,18 +150,19 @@ class Global_Mean_2(Mean):
         self.weight_functions = ModuleList(weight_functions)
         self.output_distance = output_distance
 
-    def forward(self, x:torch.Tensor):
+    def forward(self, x:torch.Tensor, **params):
         mean_list = [local_mean(x) for local_mean in self.local_means]
         
-        distance_measure =  mean_list if self.output_distance else [x.clone() for _ in range(len(mean_list))] 
+        # distance_measure =  mean_list if self.output_distance else [x.clone() for _ in range(len(mean_list))] 
+        distance_measure =  params["out"] if self.output_distance else x.clone() 
 
-        weight_list = [self.weight_functions[i](distance_measure[i]) for i in range(len(self.weight_functions))]
+        weight_list = [self.weight_functions[i](distance_measure) for i in range(len(self.weight_functions))]
 
         mean = sum(mean_list[i] * weight_list[i] for i in range(len(mean_list)))/sum(weight_list)
 
         if DEBUG:
             plot_weights(x, weight_list)
-            plot_weights(x, [mean_list[0][:,0],mean_list[1][:,0]], 'Local Means')
+            plot_weights(x, [mean_list[i][:,0] for i in range(len(mean_list))], 'Local Means')
             plot_weights(x, sum(weight_list), 'Sum of Weights')
 
         return mean

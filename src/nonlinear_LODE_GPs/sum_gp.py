@@ -5,40 +5,10 @@ import torch
 from nonlinear_LODE_GPs.mean_modules import *
 from nonlinear_LODE_GPs.weighting import *
 from nonlinear_LODE_GPs.lodegp import *
+from nonlinear_LODE_GPs.gp import BatchIndependentMultitaskGPModel
 
 import matplotlib.pyplot as plt 
 import seaborn as sns
-
-class MultitaskGPModel(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood):
-        super(MultitaskGPModel, self).__init__(train_x, train_y, likelihood)
-        self.mean_module = gpytorch.means.MultitaskMean(
-            gpytorch.means.ConstantMean(), num_tasks=2
-        )
-        self.covar_module = gpytorch.kernels.MultitaskKernel(
-            gpytorch.kernels.RBFKernel(), num_tasks=2, rank=1
-        )
-
-    def forward(self, x):
-        mean_x = self.mean_module(x)
-        covar_x = self.covar_module(x)
-        return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)
-    
-class BatchIndependentMultitaskGPModel(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, num_tasks):
-        super().__init__(train_x, train_y, likelihood)
-        self.mean_module = gpytorch.means.ConstantMean(batch_shape=torch.Size([num_tasks]))
-        self.covar_module = gpytorch.kernels.ScaleKernel(
-            gpytorch.kernels.RBFKernel(batch_shape=torch.Size([num_tasks])),
-            batch_shape=torch.Size([num_tasks])
-        )
-
-    def forward(self, x):
-        mean_x = self.mean_module(x)
-        covar_x = self.covar_module(x)
-        return gpytorch.distributions.MultitaskMultivariateNormal.from_batch_mvn(
-            gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
-        )
 
 class Weighted_GP(LODEGP):#gpytorch.models.deep_gps.DeepGP
     def __init__(self, train_x, train_y, likelihood, num_tasks, system_matrix, equilibrium, weight_lengthscale):
@@ -138,7 +108,18 @@ class Weighted_Sum_GP(gpytorch.models.ExactGP):
 
 # class Local_GP_Sum(gpytorch.Module):
 class Local_GP_Sum(gpytorch.models.ExactGP):
-    def __init__(self, train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=None):
+    def __init__(
+            self, 
+            train_x, 
+            train_y, 
+            likelihood, 
+            num_tasks, 
+            system_matrices, 
+            equilibriums, 
+            centers, 
+            Weight_Model:Gaussian_Weight,
+            weight_lengthscale=None
+            ):
         super(Local_GP_Sum, self).__init__(train_x, train_y, likelihood)
         # super(LODEGP, self).__init__(train_x, train_y, likelihood)
         
@@ -155,15 +136,15 @@ class Local_GP_Sum(gpytorch.models.ExactGP):
             mean_module = Equilibrium_Mean(equilibriums[i], num_tasks)
             model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrices[i], mean_module)
 
-            w_fcts.append(Gaussian_Weight(centers[i]))#, weight_lengthscale
+            w_fcts.append(Weight_Model(centers[i]))
             # w_fcts[i].initialize(length=torch.tensor(weight_lengthscale, requires_grad=True))#TODO
-            w_fcts[i].length = weight_lengthscale
+            w_fcts[i].length = weight_lengthscale# TODO: add weight model specific paremeter beforehand to the model
             models.append(model)
         
         model = BatchIndependentMultitaskGPModel(train_x, train_y, likelihood, num_tasks)
         models.append(model)
         w_fct = Constant_Weight()
-        w_fct.initialize(weight=torch.tensor(0.5, requires_grad=True))
+        w_fct.initialize(weight=torch.tensor(0.5/len(system_matrices), requires_grad=True))
         w_fcts.append(w_fct)
 
         self.models = ModuleList(models)
@@ -255,25 +236,13 @@ class Local_GP_Sum(gpytorch.models.ExactGP):
 
     def predict(self, x, noise:torch.Tensor=None):
         # with torch.no_grad():
-        outputs = [self.likelihood(self.models[l](x), noise=noise) for l in range(len(self.models))]
-        weights = [self.w_fcts[l](output.mean) for l, output in enumerate(outputs)]
+        outputs = [self.models[l].likelihood(self.models[l](x), noise=noise) for l in range(len(self.models))]
+        #weights = [self.w_fcts[l](output.mean) for l, output in enumerate(outputs)]
+        weights = [self.w_fcts[l](output) for l, output in enumerate(outputs)] #TODO
         # weights_extended = [torch.tile(weights[l],(self.num_tasks,1)) for l in range(len(weights))]
         weights_extended = [weights[l].repeat_interleave(self.num_tasks) for l in range(len(weights))] 
         mean = sum([outputs[l].mean * weights[l] for l in range(len(outputs))]) /sum(weights)
         cov = sum([outputs[l].covariance_matrix * weights_extended[l] for l in range(len(outputs))])
-
-            # hm = sns.heatmap(cov,
-            #      cbar=True,
-            #     #  annot=True,
-            #      square=True,
-            #     #  fmt='.2f',
-            #     #  annot_kws={'size': 12},
-            #     #  yticklabels=cols,
-            #     #  xticklabels=cols
-            #     )
-                
-            # plt.tight_layout()
-            # plt.show()
         return mean, cov, weights
     
     def forward(self, x, noise:torch.Tensor=None):

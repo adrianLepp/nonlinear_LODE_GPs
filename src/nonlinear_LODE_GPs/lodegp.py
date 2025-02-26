@@ -14,7 +14,11 @@ def optimize_gp(gp, training_iterations=100, verbose=True, hyperparameters:dict=
     gp.likelihood.train()
 
     # Use the adam optimizer
-    optimizer = torch.optim.Adam(gp.parameters(), lr=0.03)  # Includes GaussianLikelihood parameters
+    optimizer = torch.optim.Adam(
+        # params=list(set(gp.parameters()) - {gp.pre_model.parameters() }),
+        gp.parameters(), 
+        lr=0.03
+    )  # Includes GaussianLikelihood parameters
 
     # "Loss" for GPs - the marginal log likelihood
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(gp.likelihood, gp)
