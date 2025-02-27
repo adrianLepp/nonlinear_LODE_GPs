@@ -18,6 +18,7 @@ from sage.arith.misc import factorial
 import numpy as np
 import pdb
 from gpytorch.constraints import Positive
+from linear_operator import to_linear_operator
 import random
 import einops
 import pprint
@@ -30,88 +31,233 @@ torch_operations = {'mul': torch.mul, 'add': torch.add,
 
 DEBUG =False
 
-class LODE_Kernel(Kernel):
-        def __init__(self, A, common_terms, active_dims=None, verbose=False):
-            super(LODE_Kernel, self).__init__(active_dims=active_dims)
+class Diagonal_Canonical_Kernel(Kernel):
+    def __init__(
+            self, 
+            num_tasks, 
+            eigenvalues:torch.Tensor, 
+            eigenvectors:torch.Tensor,
+            control:torch.Tensor,
+            active_dims=None
+        ):
+        super(Diagonal_Canonical_Kernel, self).__init__(active_dims=active_dims)
+        self.num_tasks = num_tasks
+        self.eigenvalues = eigenvalues
+        self.eigenvectors = eigenvectors
+        eigenvectors_inv = eigenvectors.inverse()
+        eigenvectors_t = eigenvectors.t()
 
-            self.model_parameters = torch.nn.ParameterDict()
-            #self.num_tasks = num_tasks
+        b = eigenvectors_inv @ control
 
-            D, U, V = A.smith_form()
-            if verbose:
-                print(f"D:{D}")
-                print(f"V:{V}")
-            x, a, b = var("x, a, b")
-            V_temp = [list(b) for b in V.rows()]
-            #print(V_temp)
-            V = sage_eval(f"matrix({str(V_temp)})", locals={"x":x, "a":a, "b":b})
-            Vt = V.transpose()
-            kernel_matrix, self.kernel_translation_dict, parameter_dict = create_kernel_matrix_from_diagonal(D)
-            self.ode_count = A.nrows()
-            self.kernelsize = len(kernel_matrix)
-            self.model_parameters.update(parameter_dict)
-            #print(self.model_parameters)
-            x, dx1, dx2, t1, t2, *_ = var(["x", "dx1", "dx2"] + ["t1", "t2"] + [f"LODEGP_kernel_{i}" for i in range(len(kernel_matrix[Integer(0)]))])
-            k = matrix(Integer(len(kernel_matrix)), Integer(len(kernel_matrix)), kernel_matrix)
-            V = V.substitute(x=dx1)
-            Vt = Vt.substitute(x=dx2)
+        # kernels = []
+        # for i in range(num_tasks):
+        #     if b[i] == 0:
+        #         kernels.append(First_Order_Differential_Kernel(eigenvalues[i]))
+        #     else:
+        #         kernels.append(First_Order_Differential_Kernel(eigenvalues[i], u=b[i]))
+        # self.kernels = torch.nn.ModuleList(kernels)
 
-            self.V = V
-            self.matrix_multiplication = matrix(k.base_ring(), len(k[0]), len(k[0]), (V*k*Vt))
-            self.diffed_kernel = differentiate_kernel_matrix(k, V, Vt, self.kernel_translation_dict)
-            self.sum_diff_replaced = replace_sum_and_diff(self.diffed_kernel)
-            self.covar_description = translate_kernel_matrix_to_gpytorch_kernel(self.sum_diff_replaced, self.model_parameters, common_terms=common_terms)
+        task_range = range(num_tasks)
 
-            self.num_tasks = len(self.covar_description)
+        k_eigen= [[Constant_Kernel(eigenvectors[i, j]) for j in task_range] for i in task_range]
+        k_eigen_t= [[Constant_Kernel(eigenvectors_t[i, j]) for j in task_range] for i in task_range]
+        k_eigen_inv = [[Constant_Kernel(eigenvectors_inv[i, j]) for j in task_range] for i in task_range]
 
-        def num_outputs_per_input(self, x1, x2):
-            """
-            Given `n` data points `x1` and `m` datapoints `x2`, this multitask
-            kernel returns an `(n*num_tasks) x (m*num_tasks)` covariance matrix.
-            """
-            return self.num_tasks
+        K = [[None for j in task_range] for i in task_range]
+        _K = K
+        for i in task_range:
+            for j in task_range:
+                # _K[i].append(Constant_Kernel(k_eigen[i][j]) * First_Order_Differential_Kernel(eigenvalues[j], b[j]))
+                #_K[i].append(k_eigen[i][j] * First_Order_Differential_Kernel(eigenvalues[j], b[j]))
+                _K[i][j] = (k_eigen[i][j] * First_Order_Differential_Kernel(eigenvalues[j], b[j]))
 
-        #def forward(self, X, Z=None, common_terms=None):
-        def forward(self, x1, x2, diag=False, **params):
-            common_terms = params["common_terms"]
-            model_parameters = self.model_parameters
-            if not x2 is None:
-                common_terms["t_diff"] = x1-x2.t()
-                common_terms["t_sum"] = x1+x2.t()
-                common_terms["t_ones"] = torch.ones_like(x1+x2.t())
-                common_terms["t_zeroes"] = torch.zeros_like(x1+x2.t())
-            K_list = list() 
-            for rownum, row in enumerate(self.covar_description):
-                for cell in row:
-                    K_list.append(eval(cell))
-            kernel_count = len(self.covar_description)
-            # from https://discuss.pytorch.org/t/how-to-interleave-two-tensors-along-certain-dimension/11332/6
-            #if K_list[0].ndim == 1:
-            #    K_list = [kk.unsqueeze(1) for kk in K_list]
-            K = einops.rearrange(K_list, '(t1 t2) h w -> (h t1) (w t2)', t1=kernel_count, t2=kernel_count)  
+        for i in task_range:
+            for j in task_range:
+                for l in task_range:
+                    if l == 0:
+                        K[i][j] = _K[i][l] * k_eigen_t[l][j]
+                    else:
+                        K[i][j] += _K[i][l] * k_eigen_t[l][j]
+                #K_2[i].append(K[i][0] * Constant_Kernel(k_eigen_inv[0][j])+ K[i][1] * Constant_Kernel(k_eigen_inv[1][j]))
+                # K[i].append(_K[i][0] * k_eigen_t[0][j]+ _K[i][1] * k_eigen_t[1][j])
+                # K_2[i].append(sum([K[i][l] * Constant_Kernel(k_eigen_inv[l][j]) for l in range(len(K))])) #FIXME: how is sum possible
+                # K[i][j] = (_K[i][0] * k_eigen_t[0][j]+ _K[i][1] * k_eigen_t[1][j])
 
-            if diag:
-                return K.diag()
-            return K 
+        self.K = K
+
+
+
+    def forward(self, x1, x2, diag=False, last_dim_is_batch=False, **params):
+        if last_dim_is_batch:
+            raise RuntimeError("MultitaskKernel does not accept the last_dim_is_batch argument.")
         
-        def __str__(self, substituted=False):
-            if substituted:
-                return pprint.pformat(str(self.sum_diff_replaced), indent=self.kernelsize)
-            else:
-                return pprint.pformat(str(self.diffed_kernel), indent=self.kernelsize)
+        K_list = list() 
+        for row in self.K:
+            for kernel in row:
+                K_list.append(kernel(x1, x2, diag=False, last_dim_is_batch=False, **params).to_dense())
+        # from https://discuss.pytorch.org/t/how-to-interleave-two-tensors-along-certain-dimension/11332/6
+        #if K_list[0].ndim == 1:
+        #    K_list = [kk.unsqueeze(1) for kk in K_list]
+        K = einops.rearrange(K_list, '(t1 t2) h w -> (h t1) (w t2)', t1=self.num_tasks, t2=self.num_tasks)
+        return K
+    
+    def num_outputs_per_input(self, x1, x2):
+        """
+        Given `n` data points `x1` and `m` datapoints `x2`, this multitask
+        kernel returns an `(n*num_tasks) x (m*num_tasks)` covariance matrix.
+        """
+        return self.num_tasks
 
-        def __latexify_kernel__(self, substituted=False):
-            if substituted:
-                return pprint.pformat(latex(self.sum_diff_replaced), indent=self.kernelsize)
-            else:
-                return pprint.pformat(latex(self.diffed_kernel), indent=self.kernelsize)
+class First_Order_Differential_Kernel(Kernel):
+    def __init__(self, a, u=None):
+        super(First_Order_Differential_Kernel, self).__init__()
+        self.a = a
+        if u == 0:
+            self.u = None
+        else:
+            self.u = u
 
-        def __pretty_print_kernel__(self, substituted=False):
-            if substituted:
-                return pprint.pformat(pretty_print(self.matrix_multiplication), indent=self.kernelsize)
-            else:
-                pretty_print(self.matrix_multiplication)
-                print(str(self.kernel_translation_dict))
+    def forward(self, x1, x2, **params):
+        if x2 is None:
+            input_sum = x1+x1.t()
+        else:
+            input_sum = x1+x2.t()
+        # input_sum = self.covar_sum(x1, x2, **params)
+        exponent = torch.exp(self.a*input_sum)
+        if self.u is None:
+            return exponent
+        else:
+            return self.u**2 / self.a**2 * exponent
+            
+    
+    def covar_sum(
+        self,
+        x1: torch.Tensor,
+        x2: torch.Tensor,
+        diag: bool = False,
+        last_dim_is_batch: bool = False,
+        **params,
+    ) -> torch.Tensor:
+        r"""
+        computes to sum of the inputs. Inspired by self.covar_dist
+        """
+        if last_dim_is_batch:
+            x1 = x1.transpose(-1, -2).unsqueeze(-1)
+            x2 = x2.transpose(-1, -2).unsqueeze(-1)
+
+        res = None
+
+        if diag:
+            res = x1 + x2
+            return res
+        else:
+            return self.sum(x1, x2)
+        
+    def sum(self, x1, x2):
+        """
+        Equivalent to `torch.cdist` with p=2, but clamps the minimum element to 1e-15.
+        """
+        res = torch.cdist(x1, -x2)
+        return res
+
+
+class Constant_Kernel(Kernel):
+    def __init__(self, c, active_dims=None):
+        super(Constant_Kernel, self).__init__(active_dims=active_dims)
+        self.c = c
+
+    def forward(self, x1, x2, diag=False, last_dim_is_batch=False, **params):
+        # if last_dim_is_batch:
+        #     raise RuntimeError("MultitaskKernel does not accept the last_dim_is_batch argument.")
+        if diag:
+            return self.c
+        return self.c * torch.ones(x1.size(0), x2.size(0))
+
+    def num_outputs_per_input(self, x1, x2):
+        return 1
+
+class LODE_Kernel(Kernel):
+    def __init__(self, A, common_terms, active_dims=None, verbose=False):
+        super(LODE_Kernel, self).__init__(active_dims=active_dims)
+
+        self.model_parameters = torch.nn.ParameterDict()
+        #self.num_tasks = num_tasks
+
+        D, U, V = A.smith_form()
+        if verbose:
+            print(f"D:{D}")
+            print(f"V:{V}")
+        x, a, b = var("x, a, b")
+        V_temp = [list(b) for b in V.rows()]
+        #print(V_temp)
+        V = sage_eval(f"matrix({str(V_temp)})", locals={"x":x, "a":a, "b":b})
+        Vt = V.transpose()
+        kernel_matrix, self.kernel_translation_dict, parameter_dict = create_kernel_matrix_from_diagonal(D)
+        self.ode_count = A.nrows()
+        self.kernelsize = len(kernel_matrix)
+        self.model_parameters.update(parameter_dict)
+        #print(self.model_parameters)
+        x, dx1, dx2, t1, t2, *_ = var(["x", "dx1", "dx2"] + ["t1", "t2"] + [f"LODEGP_kernel_{i}" for i in range(len(kernel_matrix[Integer(0)]))])
+        k = matrix(Integer(len(kernel_matrix)), Integer(len(kernel_matrix)), kernel_matrix)
+        V = V.substitute(x=dx1)
+        Vt = Vt.substitute(x=dx2)
+
+        self.V = V
+        self.matrix_multiplication = matrix(k.base_ring(), len(k[0]), len(k[0]), (V*k*Vt))
+        self.diffed_kernel = differentiate_kernel_matrix(k, V, Vt, self.kernel_translation_dict)
+        self.sum_diff_replaced = replace_sum_and_diff(self.diffed_kernel)
+        self.covar_description = translate_kernel_matrix_to_gpytorch_kernel(self.sum_diff_replaced, self.model_parameters, common_terms=common_terms)
+
+        self.num_tasks = len(self.covar_description)
+
+    def num_outputs_per_input(self, x1, x2):
+        """
+        Given `n` data points `x1` and `m` datapoints `x2`, this multitask
+        kernel returns an `(n*num_tasks) x (m*num_tasks)` covariance matrix.
+        """
+        return self.num_tasks
+
+    #def forward(self, X, Z=None, common_terms=None):
+    def forward(self, x1, x2, diag=False, **params):
+        common_terms = params["common_terms"]
+        model_parameters = self.model_parameters
+        if not x2 is None:
+            common_terms["t_diff"] = x1-x2.t()
+            common_terms["t_sum"] = x1+x2.t()
+            common_terms["t_ones"] = torch.ones_like(x1+x2.t())
+            common_terms["t_zeroes"] = torch.zeros_like(x1+x2.t())
+        K_list = list() 
+        for rownum, row in enumerate(self.covar_description):
+            for cell in row:
+                K_list.append(eval(cell))
+        kernel_count = len(self.covar_description)
+        # from https://discuss.pytorch.org/t/how-to-interleave-two-tensors-along-certain-dimension/11332/6
+        #if K_list[0].ndim == 1:
+        #    K_list = [kk.unsqueeze(1) for kk in K_list]
+        K = einops.rearrange(K_list, '(t1 t2) h w -> (h t1) (w t2)', t1=kernel_count, t2=kernel_count)  
+
+        if diag:
+            return K.diag()
+        return K 
+    
+    def __str__(self, substituted=False):
+        if substituted:
+            return pprint.pformat(str(self.sum_diff_replaced), indent=self.kernelsize)
+        else:
+            return pprint.pformat(str(self.diffed_kernel), indent=self.kernelsize)
+
+    def __latexify_kernel__(self, substituted=False):
+        if substituted:
+            return pprint.pformat(latex(self.sum_diff_replaced), indent=self.kernelsize)
+        else:
+            return pprint.pformat(latex(self.diffed_kernel), indent=self.kernelsize)
+
+    def __pretty_print_kernel__(self, substituted=False):
+        if substituted:
+            return pprint.pformat(pretty_print(self.matrix_multiplication), indent=self.kernelsize)
+        else:
+            pretty_print(self.matrix_multiplication)
+            print(str(self.kernel_translation_dict))
 
 
 

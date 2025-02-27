@@ -1,7 +1,7 @@
 import gpytorch 
 from sage.all import *
 from sage.calculus.var import var
-from nonlinear_LODE_GPs.kernels import *
+from nonlinear_LODE_GPs.kernels import LODE_Kernel, Diagonal_Canonical_Kernel
 import pprint
 import torch
 from nonlinear_LODE_GPs.masking import masking, create_mask
@@ -124,6 +124,44 @@ class LODEGP(gpytorch.models.ExactGP):
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)   
 
     
+class Diagonal_Canonical_GP(gpytorch.models.ExactGP):
+    num_tasks:int
+    contains_nan:bool
+
+    def __init__(
+            self, 
+            train_x:torch.Tensor, 
+            train_y:torch.Tensor, 
+            likelihood:gpytorch.likelihoods.Likelihood, 
+            num_tasks:int, 
+            eigenvec:torch.Tensor,
+            eigenval:torch.Tensor,
+            control:torch.Tensor, 
+            mean_module:gpytorch.means.Mean=None,
+            additive_se=False,
+        ):
+        
+        self.num_tasks = num_tasks
+
+        super(Diagonal_Canonical_GP, self).__init__(train_x, train_y, likelihood)
+
+        if mean_module is None:
+            self.mean_module = gpytorch.means.MultitaskMean(gpytorch.means.ZeroMean(), num_tasks=num_tasks)
+        else:
+            self.mean_module = mean_module
+
+        if additive_se:
+            self.covar_module =gpytorch.kernels.ScaleKernel(gpytorch.kernels.MultitaskKernel(
+                gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=0
+            )) + gpytorch.kernels.ScaleKernel(Diagonal_Canonical_Kernel(num_tasks, eigenvalues=eigenval, eigenvectors=eigenvec, control=control))
+        else:
+            self.covar_module = Diagonal_Canonical_Kernel(num_tasks, eigenvalues=eigenval, eigenvectors=eigenvec, control=control)
+
+    def forward(self, X):
+        mean_x = self.mean_module(X)
+        covar_x = self.covar_module(X)
+    
+        return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)   
 
 
     
