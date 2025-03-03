@@ -1,7 +1,7 @@
 import gpytorch 
 from sage.all import *
 from sage.calculus.var import var
-from nonlinear_LODE_GPs.kernels import LODE_Kernel, Diagonal_Canonical_Kernel
+from nonlinear_LODE_GPs.kernels import LODE_Kernel, _Diagonal_Canonical_Kernel
 import pprint
 import torch
 from nonlinear_LODE_GPs.masking import masking, create_mask
@@ -136,7 +136,8 @@ class Diagonal_Canonical_GP(gpytorch.models.ExactGP):
             num_tasks:int, 
             eigenvec:torch.Tensor,
             eigenval:torch.Tensor,
-            control:torch.Tensor, 
+            control:torch.Tensor,
+            u, 
             mean_module:gpytorch.means.Mean=None,
             additive_se=False,
         ):
@@ -153,9 +154,9 @@ class Diagonal_Canonical_GP(gpytorch.models.ExactGP):
         if additive_se:
             self.covar_module =gpytorch.kernels.ScaleKernel(gpytorch.kernels.MultitaskKernel(
                 gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=0
-            )) + gpytorch.kernels.ScaleKernel(Diagonal_Canonical_Kernel(num_tasks, eigenvalues=eigenval, eigenvectors=eigenvec, control=control))
+            )) + gpytorch.kernels.ScaleKernel(_Diagonal_Canonical_Kernel(num_tasks, eigenvalues=eigenval, eigenvectors=eigenvec, control=control, u=u))
         else:
-            self.covar_module = Diagonal_Canonical_Kernel(num_tasks, eigenvalues=eigenval, eigenvectors=eigenvec, control=control)
+            self.covar_module = _Diagonal_Canonical_Kernel(num_tasks, eigenvalues=eigenval, eigenvectors=eigenvec, control=control, u=u)
 
     def forward(self, X):
         mean_x = self.mean_module(X)

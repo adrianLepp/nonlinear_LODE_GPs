@@ -31,6 +31,62 @@ torch_operations = {'mul': torch.mul, 'add': torch.add,
 
 DEBUG =False
 
+
+class _Diagonal_Canonical_Kernel(Kernel):
+    def __init__(
+            self, 
+            num_tasks, 
+            eigenvalues:torch.Tensor, 
+            eigenvectors:torch.Tensor,
+            control:torch.Tensor,
+            u:torch.Tensor,
+            active_dims=None
+        ):
+        super(_Diagonal_Canonical_Kernel, self).__init__(active_dims=active_dims)
+        self.num_tasks = num_tasks
+        self.eigenvalues = eigenvalues
+        self.eigenvectors = eigenvectors
+        eigenvectors_inv = eigenvectors.inverse()
+        eigenvectors_t = eigenvectors.t()
+
+        # b = eigenvectors_inv @ control
+        b = control
+
+        task_range = range(num_tasks)
+
+        K = [[None for j in task_range] for i in task_range]
+        _K = K
+        for i in task_range:
+            for j in task_range:
+                sol1 = First_Order_Differential_Solution(eigenvalues[i], b[i])
+                sol2 = First_Order_Differential_Solution(eigenvalues[j], b[j])
+                _K[i][j] = _First_Order_Differential_Kernel(sol1, sol2, u)
+
+        self.K = _K
+
+
+
+    def forward(self, x1, x2, diag=False, last_dim_is_batch=False, **params):
+        if last_dim_is_batch:
+            raise RuntimeError("MultitaskKernel does not accept the last_dim_is_batch argument.")
+        
+        K_list = list() 
+        for row in self.K:
+            for kernel in row:
+                K_list.append(kernel(x1, x2, diag=False, last_dim_is_batch=False, **params).to_dense())
+        # from https://discuss.pytorch.org/t/how-to-interleave-two-tensors-along-certain-dimension/11332/6
+        #if K_list[0].ndim == 1:
+        #    K_list = [kk.unsqueeze(1) for kk in K_list]
+        K = einops.rearrange(K_list, '(t1 t2) h w -> (h t1) (w t2)', t1=self.num_tasks, t2=self.num_tasks)
+        return K
+    
+    def num_outputs_per_input(self, x1, x2):
+        """
+        Given `n` data points `x1` and `m` datapoints `x2`, this multitask
+        kernel returns an `(n*num_tasks) x (m*num_tasks)` covariance matrix.
+        """
+        return self.num_tasks
+
 class Diagonal_Canonical_Kernel(Kernel):
     def __init__(
             self, 
@@ -108,6 +164,33 @@ class Diagonal_Canonical_Kernel(Kernel):
         """
         return self.num_tasks
 
+
+class First_Order_Differential_Solution(torch.nn.Module):
+    def __init__(self, a, b):
+        super(First_Order_Differential_Solution, self).__init__()
+        self.a = a
+        self.b = b
+
+    def forward(self, t:torch.Tensor, u:torch.Tensor):
+        if self.b is None or self.b == 0:
+            return 1 / self.a * torch.exp(self.a*t)
+        else:
+            return u * self.b / self.a * torch.exp(self.a*t)
+        
+class _First_Order_Differential_Kernel(Kernel):
+    def __init__(self, sol1:First_Order_Differential_Solution, sol2:First_Order_Differential_Solution, u):
+        super(_First_Order_Differential_Kernel, self).__init__()
+        self.sol1 = sol1
+        self.sol2 = sol2
+        self.u = u
+
+    def forward(self, x1, x2, **params):
+        if x2 is None:
+            x2 = x1.t()
+
+        return self.sol1(x1,self.u) * self.sol2(x2.t(),self.u)
+        
+
 class First_Order_Differential_Kernel(Kernel):
     def __init__(self, a, u=None):
         super(First_Order_Differential_Kernel, self).__init__()
@@ -125,7 +208,7 @@ class First_Order_Differential_Kernel(Kernel):
         # input_sum = self.covar_sum(x1, x2, **params)
         exponent = torch.exp(self.a*input_sum)
         if self.u is None:
-            return exponent
+            return 1 / self.a**2 * exponent
         else:
             return self.u**2 / self.a**2 * exponent
             
@@ -172,6 +255,20 @@ class Constant_Kernel(Kernel):
         if diag:
             return self.c
         return self.c * torch.ones(x1.size(0), x2.size(0))
+
+    def num_outputs_per_input(self, x1, x2):
+        return 1
+    
+class Zero_Kernel(Kernel):
+    def __init__(self, active_dims=None):
+        super(Zero_Kernel, self).__init__(active_dims=active_dims)
+
+    def forward(self, x1, x2, diag=False, last_dim_is_batch=False, **params):
+        # if last_dim_is_batch:
+        #     raise RuntimeError("MultitaskKernel does not accept the last_dim_is_batch argument.")
+        if diag:
+            return 0
+        return torch.zeros(x1.size(0), x2.size(0))
 
     def num_outputs_per_input(self, x1, x2):
         return 1
