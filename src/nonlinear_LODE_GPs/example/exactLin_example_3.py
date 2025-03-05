@@ -27,6 +27,7 @@ SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 t  = 20
 optim_steps = 100
+optim_steps_2 = 300
 downsample = 10
 sim_time = Time_Def(0, t, step=0.01)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
@@ -149,7 +150,7 @@ control_gp = Linearizing_Control_2(
     #  v
      )
 
-control_gp.optimize(optim_steps, verbose=True)
+control_gp.optimize(optim_steps_2, verbose=True)
 
 u_likelihood.eval()
 
@@ -187,46 +188,48 @@ ax2.set_title('Control estimation inverted pendulum')
 ax2.grid(True)
 ax2.legend()
 
+plt.show()
+
 # ----------------------------------------------------------------------------
 # PART III: control system with GP
 # ----------------------------------------------------------------------------
 
 def alpha(x):
-    return control_gp.alpha(torch.tensor(x).unsqueeze(0)).mean.detach().numpy()
+    return control_gp.alpha(torch.tensor(x).unsqueeze(0)).mean.clone().detach().numpy()
 
 def beta(x):
-    return control_gp.beta(torch.tensor(x).unsqueeze(0)).mean.detach().numpy()
+    return control_gp.beta(torch.tensor(x).unsqueeze(0)).mean.clone().detach().numpy()
 
 
-a0 = 2
-a1 = 3
+a0 = 1
+a1 = 1
 v = 1
-system_2 = load_system(system_name, a0=a0, a1=a1, v=1)
+system_2 = load_system(system_name, a0=a0, a1=a1, v=v)
 system_2.alpha = alpha
 system_2.beta = beta
 
-y_ref_control = np.zeros((sim_time.count,1))
+y_ref_control = np.zeros((sim_time.count))
 ts = sim_time.linspace()
 sol = solve_ivp(
     system_2.stateTransition_2, 
     [sim_time.start, sim_time.end], 
-    x_1[0:system.state_dimension], 
+    x_0[0:system_2.state_dimension], 
     method='RK45', 
-    t_eval=ts, args=(y_ref_control.squeeze(),sim_time.step)
+    t_eval=ts, args=(y_ref_control,sim_time.step)
 )
 x = sol.y.transpose()
 
 solution = []
 for i in range (x.shape[1]):
-    solution.append(torch.tensor(x[:,i]))
-solution.append(torch.tensor(y_ref_control.squeeze()))
+    solution.append(x[:,i])
+solution.append(y_ref_control)
 
-control_y = torch.stack(solution, -1)
+control_y = np.stack(solution, -1)
 
 for i in range(len(ts)):
-    control_y[i,-1] = system.get_control_from_latent(y_ref_control[i].squeeze(), control_y[i,0:2])
+    control_y[i,-1] = system_2.get_control_from_latent(y_ref_control[i], control_y[i,0:2])
 
-control_data = Data_Def(ts.numpy(), control_y.numpy(), system.state_dimension, system.control_dimension, sim_time)
+control_data = Data_Def(ts.numpy(), control_y, system_2.state_dimension, system_2.control_dimension, sim_time)
 
 # control_data.y = system.rad_to_deg(control_data.y)
 # control_data.y = system.rad_to_deg(control_data.y) FIXME
