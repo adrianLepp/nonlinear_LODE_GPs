@@ -58,7 +58,8 @@ def get_feedback_controller(sim_configs:List[Simulation_Config], system_data:Lis
     III: use the learned linearizing feedback controller to learn the nonlinearities of the system
     '''
     y_ref = []
-    x_u = []
+    x = []
+    u = []
 
     for i, sim_config in enumerate(sim_configs):
         _train_x_u = lodegp_data[i].y.clone()
@@ -66,29 +67,23 @@ def get_feedback_controller(sim_configs:List[Simulation_Config], system_data:Lis
         _train_y_ref = lodegp_data[i].y[:,-1].clone()
 
         train_y_ref, train_x_u  = downsample_data(_train_y_ref, _train_x_u, sim_config.downsample)
-        x_u.append(train_x_u)
+        # x_u.append(train_x_u)
+        x.append(train_x_u[:,:-1])
+        u.append(train_x_u[:,-1])
         y_ref.append(train_y_ref)
 
 
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
 
     control_gp = Linearizing_Control_2(
-        x_u[0][:,0:-1],
-        x_u[0][:,-1],
-        y_ref[0],
-        x_u[1][:,0:-1],
-        x_u[1][:,-1],
-        y_ref[1],
-        # lodegp_data[0].y[:,0:-1],
-        # torch.tensor(sim_configs[0].u), 
-        # lodegp_data[0].y[:,-1],
-        # lodegp_data[1].y[:,0:-1],
-        # torch.tensor(sim_configs[1].u), 
-        # lodegp_data[1].y[:,-1],  
+        x,
+        u,
+        y_ref,
         likelihood,
+        consecutive_training=False
         )
     #control_gp.optimize_all(optim_steps, verbose=True)
-    control_gp.optimize(optim_steps, verbose=True)
+    control_gp.optimize_consecutive(optim_steps, verbose=True)
     
     return control_gp
 

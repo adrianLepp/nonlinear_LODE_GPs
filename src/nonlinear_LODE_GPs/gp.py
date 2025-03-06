@@ -1,5 +1,6 @@
 import gpytorch
 import torch
+from typing import List
 
 class GP(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood,
@@ -69,38 +70,30 @@ class Linearizing_Control(gpytorch.models.ExactGP):
 class Linearizing_Control_2(torch.nn.Module):
     def __init__(
             self, 
-            train_x_alpha:torch.Tensor, 
-            train_u_alpha:torch.Tensor, 
-            train_y_alpha:torch.Tensor,
-            train_x_beta:torch.Tensor, 
-            train_u_beta:torch.Tensor, 
-            train_y_beta:torch.Tensor, 
+            train_x:List[torch.Tensor],
+            train_u:List[torch.Tensor],
+            train_y:List[torch.Tensor],
             likelihood,
+            consecutive_training = True
         ):
         super().__init__()
-        self.train_x_alpha = train_x_alpha
-        self.train_u_alpha = train_u_alpha
-        self.train_y_alpha = train_y_alpha
-        self.train_x_beta = train_x_beta
-        self.train_u_beta = train_u_beta
-        self.train_y_beta = train_y_beta
 
         self.likelihood = likelihood
 
-        self.train_u = torch.cat((train_u_alpha, train_u_beta), dim=0)
-        self.train_x = torch.cat((train_x_alpha,train_x_beta), dim=0)
-        self.train_y = torch.cat((train_y_alpha, train_y_beta), dim=0)
+        if consecutive_training:
+            if len(train_x) != 2:
+                raise Warning('Consecutive training takes two training sets')
+            self.alpha = GP(train_x[0], train_y[0], gpytorch.likelihoods.GaussianLikelihood(), mean_module=gpytorch.means.ZeroMean())
+            self.beta = GP(train_x[1], train_y[1], gpytorch.likelihoods.GaussianLikelihood(), covar_module=gpytorch.kernels.ConstantKernel())    
+            self.train_u = train_u
+        else:
+            self.train_x = torch.cat(train_x, dim=0)
+            self.train_u = torch.cat(train_u, dim=0)
+            self.train_y = torch.cat(train_y, dim=0)
 
-        self.alpha = GP(train_x_alpha, train_y_alpha, likelihood, mean_module=gpytorch.means.ZeroMean())
-        self.beta = GP(train_x_beta, train_y_beta, likelihood, covar_module=gpytorch.kernels.ConstantKernel())
-        # self.alpha = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), mean_module=gpytorch.means.ZeroMean())
-        # self.beta = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), covar_module=gpytorch.kernels.ConstantKernel())
+            self.alpha = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), mean_module=gpytorch.means.ZeroMean())
+            self.beta = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), covar_module=gpytorch.kernels.ConstantKernel())
 
-
-        # self.system  = system
-        # self.a_0 = a_0
-        # self.a_1 = a_1
-        # self.v = v
     def optimize_all(self, training_iterations=100, verbose=False):
         self.alpha.train()
         self.alpha.likelihood.train()
@@ -108,7 +101,7 @@ class Linearizing_Control_2(torch.nn.Module):
         self.beta.likelihood.train()
 
         optimizer_alpha = torch.optim.Adam(self.alpha.parameters(), lr=0.1)
-        optimizer_beta = torch.optim.Adam(self.beta.parameters(), lr=0.1)
+        optimizer_beta = torch.optim.Adam(self.beta.parameters(), lr=0.3)
         mll_alpha = gpytorch.mlls.ExactMarginalLogLikelihood(self.alpha.likelihood, self.alpha)
         mll_beta = gpytorch.mlls.ExactMarginalLogLikelihood(self.beta.likelihood, self.beta)
 
@@ -132,12 +125,12 @@ class Linearizing_Control_2(torch.nn.Module):
             # training_loss.append(loss.item())      
 
 
-    def optimize(self, training_iterations=100, verbose=False):
+    def optimize_consecutive(self, training_iterations=100, verbose=False):
         self.optimize_alpha(training_iterations, verbose)
         self.alpha.eval()
         self.alpha.likelihood.eval()
 
-        self.optimize_beta(training_iterations * 10, verbose)
+        self.optimize_beta(training_iterations * 2, verbose)
 
         self.beta.eval()
         self.beta.likelihood.eval()
@@ -167,7 +160,7 @@ class Linearizing_Control_2(torch.nn.Module):
         for i in range(training_iterations): 
             optimizer.zero_grad()
             output = self.beta(self.beta.train_inputs[0]) #self.beta(self.beta.train_inputs[0])
-            loss = -mll(output, self.beta.train_targets - self.alpha(self.beta.train_inputs[0]).mean)
+            loss = -mll(output, self.beta.train_targets - self.alpha(self.beta.train_inputs[0]).mean) #FIXME train_u
             loss.backward()
             if verbose is True:
                 print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
