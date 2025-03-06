@@ -1,13 +1,14 @@
-from sage.all import *
-import sage
+
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
 from sage.calculus.var import var
+from sage.calculus.interpolation import spline
 import torch
 import numpy as np
 from scipy.integrate import solve_ivp
 from nonlinear_LODE_GPs.systems import *
 import matplotlib.pyplot as plt
 import json
+from typing import List
 from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config, add_reference_data
 
 default_config ='config.json'
@@ -21,7 +22,7 @@ class Time_Def():
         self.start = start
         self.end = end
         if count is None and step is not None:
-            self.count = int(ceil((end-start)/step)) +1
+            self.count = int(np.ceil((end-start)/step)) +1
             self.step = step
         elif count is not None and step is None:
             self.count = count
@@ -54,13 +55,14 @@ class State_Description():
         self.max = max
 
 class Data_Def():
-    def __init__(self, x,y,state_dim:int, control_dim:int, time:Time_Def=None, uncertainty:dict=None):
+    def __init__(self, x,y,state_dim:int, control_dim:int, time:Time_Def=None, uncertainty:dict=None, y_names:List[str]=None):
         self.time = x
         self.y = y
         self.state_dim = state_dim
         self.control_dim = control_dim
         self.time_def = time
         self.uncertainty = uncertainty
+        self.y_names = y_names
 
     def to_report_data(self):
         data = {'time': self.time}

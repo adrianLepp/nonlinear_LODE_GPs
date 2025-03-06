@@ -17,7 +17,7 @@ def optimize_gp(gp, training_iterations=100, verbose=True, hyperparameters:dict=
     optimizer = torch.optim.Adam(
         # params=list(set(gp.parameters()) - {gp.pre_model.parameters() }),
         gp.parameters(), 
-        lr=0.03
+        lr=0.1
     )  # Includes GaussianLikelihood parameters
 
     # "Loss" for GPs - the marginal log likelihood
@@ -80,7 +80,7 @@ class LODEGP(gpytorch.models.ExactGP):
             mean_module:gpytorch.means.Mean=None,
             additive_se=False,
         ):
-        self.contains_nan = any(train_y.isnan().flatten())
+        self.contains_nan = train_y is not None and any(train_y.isnan().flatten())
         self.num_tasks = num_tasks
 
         if self.contains_nan and isinstance(likelihood, MultitaskGaussianLikelihoodWithMissingObs):
@@ -95,12 +95,20 @@ class LODEGP(gpytorch.models.ExactGP):
         else:
             self.mean_module = mean_module
         
-        self.common_terms = {
-            "t_diff" : train_x-train_x.t(),
-            "t_sum" : train_x+train_x.t(),
-            "t_ones": torch.ones_like(train_x-train_x.t()),
-            "t_zeroes": torch.zeros_like(train_x-train_x.t())
-        }
+        if train_x is not None:
+            self.common_terms = {
+                "t_diff" : train_x-train_x.t(),
+                "t_sum" : train_x+train_x.t(),
+                "t_ones": torch.ones_like(train_x-train_x.t()),
+                "t_zeroes": torch.zeros_like(train_x-train_x.t())
+            }
+        else:
+            self.common_terms = {
+                "t_diff" : None,
+                "t_sum" : None,
+                "t_ones": None,
+                "t_zeroes": None
+            }
 
         if additive_se:
             self.covar_module =gpytorch.kernels.ScaleKernel(gpytorch.kernels.MultitaskKernel(
@@ -122,6 +130,18 @@ class LODEGP(gpytorch.models.ExactGP):
             return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)   
     
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)   
+    
+    def set_train_data(self, inputs=None, targets=None, strict=True):
+        self.contains_nan = targets is not None and any(targets.isnan().flatten())
+        if self.contains_nan and isinstance(self.likelihood, MultitaskGaussianLikelihoodWithMissingObs):
+            targets, self.mask = create_mask(targets)
+        self.common_terms = {
+                "t_diff" : inputs-inputs.t(),
+                "t_sum" : inputs+inputs.t(),
+                "t_ones": torch.ones_like(inputs-inputs.t()),
+                "t_zeroes": torch.zeros_like(inputs-inputs.t())
+            }
+        return super().set_train_data(inputs, targets, strict)
 
     
 class Diagonal_Canonical_GP(gpytorch.models.ExactGP):

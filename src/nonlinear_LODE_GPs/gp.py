@@ -76,10 +76,6 @@ class Linearizing_Control_2(torch.nn.Module):
             train_u_beta:torch.Tensor, 
             train_y_beta:torch.Tensor, 
             likelihood,
-            # system,
-            # a_0,
-            # a_1,
-            # v
         ):
         super().__init__()
         self.train_x_alpha = train_x_alpha
@@ -91,21 +87,57 @@ class Linearizing_Control_2(torch.nn.Module):
 
         self.likelihood = likelihood
 
+        self.train_u = torch.cat((train_u_alpha, train_u_beta), dim=0)
+        self.train_x = torch.cat((train_x_alpha,train_x_beta), dim=0)
+        self.train_y = torch.cat((train_y_alpha, train_y_beta), dim=0)
+
         self.alpha = GP(train_x_alpha, train_y_alpha, likelihood, mean_module=gpytorch.means.ZeroMean())
-        self.beta = GP(train_x_beta, train_y_beta, likelihood, covar_module=gpytorch.kernels.ConstantKernel()) #
+        self.beta = GP(train_x_beta, train_y_beta, likelihood, covar_module=gpytorch.kernels.ConstantKernel())
+        # self.alpha = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), mean_module=gpytorch.means.ZeroMean())
+        # self.beta = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), covar_module=gpytorch.kernels.ConstantKernel())
 
 
         # self.system  = system
         # self.a_0 = a_0
         # self.a_1 = a_1
         # self.v = v
+    def optimize_all(self, training_iterations=100, verbose=False):
+        self.alpha.train()
+        self.alpha.likelihood.train()
+        self.beta.train()
+        self.beta.likelihood.train()
+
+        optimizer_alpha = torch.optim.Adam(self.alpha.parameters(), lr=0.1)
+        optimizer_beta = torch.optim.Adam(self.beta.parameters(), lr=0.1)
+        mll_alpha = gpytorch.mlls.ExactMarginalLogLikelihood(self.alpha.likelihood, self.alpha)
+        mll_beta = gpytorch.mlls.ExactMarginalLogLikelihood(self.beta.likelihood, self.beta)
+
+        training_loss = [] 
+        for i in range(training_iterations): 
+            optimizer_alpha.zero_grad()
+            output_alpha = self.alpha(self.train_x)
+
+            optimizer_beta.zero_grad()
+            output_beta = self.beta(self.train_x)
+
+
+            loss_alpha = -mll_alpha(output_alpha, self.train_y - output_beta.mean * self.train_u)
+            loss_beta = -mll_beta(output_beta, self.train_y - output_alpha.mean)
+            loss_alpha.backward()
+            loss_beta.backward()
+            if verbose is True:
+                print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, (loss_alpha.item() + loss_beta.item())/2))
+            optimizer_alpha.step()
+            optimizer_beta.step()
+            # training_loss.append(loss.item())      
+
 
     def optimize(self, training_iterations=100, verbose=False):
         self.optimize_alpha(training_iterations, verbose)
         self.alpha.eval()
         self.alpha.likelihood.eval()
 
-        self.optimize_beta(training_iterations*10, verbose)
+        self.optimize_beta(training_iterations * 10, verbose)
 
         self.beta.eval()
         self.beta.likelihood.eval()
@@ -144,8 +176,8 @@ class Linearizing_Control_2(torch.nn.Module):
     
 
     def y_ref(self, x:torch.Tensor, u:torch.Tensor):
-        alpha = self.likelihood(self.alpha(x)).mean
-        beta = self.likelihood(self.beta(x)).mean
+        alpha = self.alpha.likelihood(self.alpha(x)).mean
+        beta = self.beta.likelihood(self.beta(x)).mean
 
         mean_x =  alpha + beta * u.squeeze()
 
@@ -158,3 +190,75 @@ class Linearizing_Control_2(torch.nn.Module):
     #     u = (y_ref - alpha) / beta
 
     #     return u
+
+
+class Linearizing_Control_3(torch.nn.Module):
+    def __init__(
+            self, 
+            train_x_alpha:torch.Tensor, 
+            train_u_alpha:torch.Tensor, 
+            train_y_alpha:torch.Tensor,
+            train_x_beta:torch.Tensor, 
+            train_u_beta:torch.Tensor, 
+            train_y_beta:torch.Tensor, 
+        ):
+        super().__init__()
+        self.train_x_alpha = train_x_alpha
+        self.train_u_alpha = train_u_alpha
+        self.train_y_alpha = train_y_alpha
+        self.train_x_beta = train_x_beta
+        self.train_u_beta = train_u_beta
+        self.train_y_beta = train_y_beta
+
+        self.train_u = torch.cat((train_u_alpha, train_u_beta), dim=0)
+        self.train_x = torch.cat((train_x_alpha,train_x_beta), dim=0)
+        self.train_y = torch.cat((train_y_alpha, train_y_beta), dim=0)
+        # self.train_u = train_u_alpha
+        # self.train_x = train_x_alpha
+        # self.train_y = train_y_alpha
+
+        # self.likelihood = likelihood
+
+        self.alpha = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), mean_module=gpytorch.means.ZeroMean())
+        self.beta = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), covar_module=gpytorch.kernels.ConstantKernel())
+        self.model = gpytorch.models.IndependentModelList(self.alpha, self.beta)
+        self.likelihood = gpytorch.likelihoods.LikelihoodList(self.alpha.likelihood, self.beta.likelihood)
+
+    def optimize(self, training_iterations=100, verbose=False):
+        self.model.train()
+        self.likelihood.train()
+
+        mll = gpytorch.mlls.SumMarginalLogLikelihood(self.likelihood, self.model)
+        # mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.model)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.1)
+
+        training_loss = []
+
+        for i in range(training_iterations):
+        
+            optimizer.zero_grad()
+            output = self.model(*self.model.train_inputs)#FIXME: [0]??? 
+            y_ref = self.y_ref_from_alpha_beta(*output, self.train_u)
+            #output.mean[0] + output.mean[1] * self.model.train_inputs[:,-1] #FIXME: u is sth different
+            loss = -mll([y_ref, y_ref], self.model.train_targets)
+            loss.backward()
+            if verbose is True:
+                print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
+            optimizer.step()
+
+            training_loss.append(loss.item())
+
+    def y_ref_from_alpha_beta(self, alpha:gpytorch.distributions.Distribution, beta:gpytorch.distributions.Distribution, u:torch.Tensor):
+        mean_x =  alpha.mean + beta.mean * u
+        covar_x = u.unsqueeze(0) * beta.covariance_matrix * u.unsqueeze(1) + alpha.covariance_matrix
+        return gpytorch.distributions.MultivariateNormal(mean_x, torch.eye(covar_x.shape[0]))#FIXME
+
+    def forward(self, x:torch.Tensor, u:torch.Tensor):
+        output = self.model(x, x)
+        y_ref:gpytorch.distributions.MultivariateNormal = self.y_ref_from_alpha_beta(*output, u)
+        return y_ref
+        # alpha = output[0]
+        # beta = output[1]
+        # mean_x =  alpha.mean + beta.mean * u
+        # covar_x = u * beta.covar_matrix * u.t() + alpha.covar_matrix
+        # return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
