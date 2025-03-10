@@ -11,11 +11,12 @@ from nonlinear_LODE_GPs.gp import GP, Linearizing_Control, Linearizing_Control_2
 
 
 class Simulation_Config():
-    def __init__(self, time:Time_Def, x_init, u, downsample:int):
+    def __init__(self, time:Time_Def, x_init, u, downsample:int, description:str):
         self.time = time
         self.x_init = x_init
         self.u = u
         self.downsample = downsample
+        self.description = description
         
 
 
@@ -75,15 +76,14 @@ def get_feedback_controller(sim_configs:List[Simulation_Config], system_data:Lis
 
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
 
-    control_gp = Linearizing_Control_2(
+    control_gp = Linearizing_Control_2(# TODO
         x,
         u,
         y_ref,
         likelihood,
-        consecutive_training=False
+        consecutive_training=True
         )
-    #control_gp.optimize_all(optim_steps, verbose=True)
-    control_gp.optimize_consecutive(optim_steps, verbose=True)
+    control_gp.optimize(optim_steps * 10, verbose=True)
     
     return control_gp
 
@@ -95,8 +95,8 @@ def test_nonlinear_functions(control_gp, sim_configs:List[Simulation_Config], lo
     control_gp.beta.eval()
 
     with torch.no_grad(), gpytorch.settings.fast_pred_var(): # and gpytorch.settings.debug(False):
-        y_ref_output_0 = control_gp.y_ref(lodegp_data[0].y[:,:-1], torch.tensor(sim_configs[0].u))
-        y_ref_output_1 = control_gp.y_ref(lodegp_data[1].y[:,:-1], torch.tensor(sim_configs[1].u))
+        y_ref_output_0 = control_gp.y_ref(lodegp_data[0].y[:,:-1], torch.tensor(sim_configs[0].u.squeeze()))
+        y_ref_output_1 = control_gp.y_ref(lodegp_data[1].y[:,:-1], torch.tensor(sim_configs[1].u.squeeze()))
 
         # y_ref_output_0 = (control_gp(_u_train_x_0)).mean
         # y_ref_output_1 = (control_gp(_u_train_x_1)).mean
@@ -153,15 +153,16 @@ def learn_system_nonlinearities(system_name:str, sim_configs:List[Simulation_Con
     control_gp = get_feedback_controller(sim_configs, system_data, lodegp_data, optim_steps)
 
     if plot is True:
+        data_names = [cfg.description for cfg in sim_configs]
         plot_states(
             system_data,
-            data_names = ['uncontrolled', 'const control'], 
+            data_names, 
             header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
             title = f'Inverted Pendulum Training Data'
         )
         plot_states(
             lodegp_data,
-            data_names = ['uncontrolled', 'const control'], 
+            data_names, 
             header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
             title = f'Inverted Pendulum LODE GP.'
         )

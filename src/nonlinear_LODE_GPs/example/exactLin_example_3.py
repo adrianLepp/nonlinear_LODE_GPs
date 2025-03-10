@@ -19,21 +19,27 @@ system_name = "inverted_pendulum"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
-t  = 20
+t  = 30
 optim_steps = 100
 optim_steps_2 = 100
-downsample = 10
+downsample = 20
 sim_time = Time_Def(0, t, step=0.01)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
 test_time = Time_Def(0, t, step=0.01)
 system = load_system(system_name, a0=0, a1=0, v=1)
 
 sim_configs = [
-    Simulation_Config(sim_time, [np.pi/2 - 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample),
-    Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.ones((sim_time.count,1)), downsample)
+    Simulation_Config(sim_time, [np.pi/2 - 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [np.pi/2 + 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.ones((sim_time.count,1)), downsample, 'u=1'),
+    Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.ones((sim_time.count,1)), downsample, 'u=-1'),
+    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()), downsample, 'sin'),
+    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()**2/4), downsample, 'sin^2'),
 ]
 
 alpha, beta = learn_system_nonlinearities(system_name, sim_configs, optim_steps, plot=True)
+
+plt.show()
 
 a0 = 2
 a1 = 3
