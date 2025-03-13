@@ -149,6 +149,9 @@ class Linearizing_Control_2(torch.nn.Module):
         mll_alpha = gpytorch.mlls.ExactMarginalLogLikelihood(self.alpha.likelihood, self.alpha)
         mll_beta = gpytorch.mlls.ExactMarginalLogLikelihood(self.beta.likelihood, self.beta)
 
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.alpha) # TODO: Does alpha or beta matter here?
+
+
         training_loss = [] 
         for i in range(training_iterations): 
             optimizer.zero_grad()
@@ -158,10 +161,15 @@ class Linearizing_Control_2(torch.nn.Module):
             output_alpha = self.alpha(self.train_x)
             output_beta = self.beta(self.train_x)
 
+            output = y_ref_from_alpha_beta(output_alpha, output_beta, self.train_u)
+
             # 2 losses
-            loss_alpha = -mll_alpha(output_alpha, self.train_y - output_beta.mean * self.train_u)
-            loss_beta = -mll_beta(output_beta, self.train_y - output_alpha.mean)
-            loss = loss_alpha + loss_beta
+            # loss_alpha = -mll_alpha(output_alpha, self.train_y - output_beta.mean * self.train_u)
+            # loss_beta = -mll_beta(output_beta, self.train_y - output_alpha.mean)
+            # loss = loss_alpha + loss_beta
+            
+            loss = -mll(output, self.train_y )
+
             # loss_alpha.backward()
             # loss_beta.backward()
             loss.backward()

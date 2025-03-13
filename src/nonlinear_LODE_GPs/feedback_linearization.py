@@ -81,7 +81,7 @@ def get_feedback_controller(sim_configs:List[Simulation_Config], system_data:Lis
         u,
         y_ref,
         likelihood,
-        consecutive_training=True
+        consecutive_training=False
         )
     control_gp.optimize(optim_steps * 10, verbose=True)
     
