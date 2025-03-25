@@ -69,31 +69,59 @@ class Inverted_Pendulum(ODE_System):
      
     def stateTransition(self, t, x, u=None, dt=None, model=None):
         u_current = self.get_control_from_list(t, dt, u)
-        
-        y_ref = 0
-        # u_current = self.get_control_from_latent(y_ref,x)
 
         dx0 = x[1]
         dx1 = -self.param.g/self.param.l*np.cos(x[0]) - self.param.d*x[1] - 1/self.param.m * u_current
         return [dx0, dx1]
     
-    def stateTransition_2(self, t, x, y_ref_control=None, dt=None, model=None): #FIXME how do you call me
-        y_ref = self.get_control_from_list(t, dt, y_ref_control)
-        u_current = self.get_control_from_latent(y_ref,x).squeeze()
+    # def stateTransition_2(self, t, x, y_ref_control=None, dt=None, direct_control=False, u=None): #FIXME how do you call me
+    #     if y_ref_control is None:
+    #         y_ref = 0
+    #     else:
+    #         y_ref = self.get_control_from_list(t, dt, y_ref_control)
+
+    #     if direct_control:
+    #         u_current = + self.polynom(x) + self.param.v * y_ref
+    #     else:
+    #         u_current = self.get_control_from_latent(y_ref,x).squeeze()
+
+    #     if u is not None:
+    #         idx = floor(abs(t/dt-0.000000001))
+    #         print(idx)
+    #         u[floor(abs(t/dt-0.000000001))] = u_current #FIXME: this is not correct, since multiple values are written to the same index (due to Runge Kutta)
+
+    #     dx0 = x[1]
+    #     dx1 = -self.param.g/self.param.l*np.cos(x[0]) - self.param.d*x[1] - 1/self.param.m * u_current
+    #     return [dx0, dx1]
+
+    def stateTransition_2(self, t, x, dt=None, controller=None, u=None, y_ref=None): #FIXME how do you call me
+        if controller is not None:
+            if y_ref is None:
+                y_ref_current = 0
+            else:
+                y_ref_current = self.get_control_from_list(t, dt,  y_ref)
+            u_current = controller(x, y_ref_current)
+            idx = floor(abs(t/dt-0.000000001))
+            u[idx] = u_current
+
+            #u_current = self.get_control_from_latent(y_ref,x).squeeze()
+        
+        elif u is not None:
+            u_current = self.get_control_from_list(t, dt, u)
+
+        else:
+            raise ValueError('No control input given')
 
         dx0 = x[1]
-        dx1 = -self.param.g/self.param.l*np.cos(x[0]) - self.param.d*x[1] - 1/self.param.m * u_current
+        dx1 = -self.param.g/self.param.l*np.cos(x[0]) - self.param.d*x[1] + 1/self.param.m * u_current
         return [dx0, dx1]
     
     def get_latent_control(self, u:float, x:np.ndarray):
-        #u = - self.param.g*np.sin(x[0]) * (self.param.a0 * x[0] + self.param.a1 * x[1]) * self.param.m + self.param.m * self.param.v * y_ref
-        # y_ref = (self.param.g*np.sin(x[0]) * polynom * self.param.m+ u)  / (self.param.m* self.param.v)
-
-        y_ref = (self.alpha(x) + self.polynom(x) + u*self.beta(x))  / self.param.v 
+        y_ref = (self.alpha(x) + self.polynom(x) + u*self.beta(x,u))  / self.param.v 
         return y_ref
     
     def get_control_from_latent(self, y_ref:float, x:np.ndarray):
-        u = self.param.v / self.beta(x) * y_ref -  (self.alpha(x) + self.polynom(x)) / self.beta(x)
+        u = self.param.v / self.beta(x, 0) * y_ref -  (self.alpha(x) + self.polynom(x)) / self.beta(x,0) #FIXME how to chooose u in beta
         return u
     
     def get_control_from_list(self, t:float, dt:float, u_list:np.ndarray):
@@ -117,8 +145,8 @@ class Inverted_Pendulum(ODE_System):
     def alpha(self, x:np.ndarray):
         return -self.param.g/self.param.l * np.cos(x[0]) - self.param.d * x[1]
 
-    def beta(self, x):
-        return - 1/self.param.m
+    def beta(self, x, u=None):
+        return 1/self.param.m
     
     def rad_to_deg(self, x):
         return x * [180 / np.pi, 180 / np.pi, 1]

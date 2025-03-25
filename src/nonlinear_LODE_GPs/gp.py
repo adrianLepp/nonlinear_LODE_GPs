@@ -9,6 +9,7 @@ from gpytorch.means import ConstantMean, LinearMean
 from gpytorch.kernels import RBFKernel, ScaleKernel
 from gpytorch.distributions import MultivariateNormal
 from gpytorch.likelihoods import GaussianLikelihood
+from linear_operator.operators import DiagLinearOperator, ConstantDiagLinearOperator
 import math
 
 class GP(gpytorch.models.ExactGP):
@@ -88,7 +89,7 @@ class Linearizing_Control_2(torch.nn.Module):
             self, 
             train_x:List[torch.Tensor],
             train_u:List[torch.Tensor],
-            train_y:List[torch.Tensor],
+            train_y:List[torch.Tensor], # y_ref
             likelihood,
             consecutive_training = True
         ):
@@ -355,6 +356,7 @@ class DeepGPHiddenLayer(DeepGPLayer):
     
 
 class LinearizingContorl_DeepGP(DeepGP):
+
     def __init__(self, train_x_shape):
         hidden_layer = DeepGPHiddenLayer(
             input_dims=train_x_shape[-1],
@@ -420,3 +422,54 @@ class LinearizingContorl_DeepGP(DeepGP):
     #                 optimizer.step()
 
     #                 minibatch_iter.set_postfix(loss=loss.item())
+
+
+
+
+class Linearizing_Control_4(gpytorch.models.ExactGP):
+    def __init__(self, train_x:torch.Tensor, train_y:torch.Tensor, train_u:torch.Tensor, likelihood, b:float, controller):
+        # train_y = _train_y - train_u
+        # controller(train_x, train_u)
+        super().__init__(train_x,  train_y, likelihood)
+        
+        self.train_u = train_u
+        # self.train_u = DiagLinearOperator(train_u)
+        self.U = DiagLinearOperator(self.train_u)
+
+        self.cov_alpha = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2))
+        self.cov_beta = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2))
+
+        self.mean_alpha = gpytorch.means.ZeroMean()
+        self.mean_beta = gpytorch.means.ConstantMean()
+        self.mean_beta.initialize(constant=torch.tensor(b, requires_grad=False))
+        self.mean_beta.raw_constant.requires_grad = False
+
+        # self.mean_module = gpytorch.means.MultitaskMean([mean_alpha, mean_beta, mean_y], num_tasks=3)
+
+        self.alpha_gp = GP(train_x, train_y, gpytorch.likelihoods.GaussianLikelihood(), mean_module=self.mean_alpha, covar_module=self.cov_alpha)
+        self.beta_gp = GP(train_x, train_y, gpytorch.likelihoods.GaussianLikelihood() , mean_module=self.mean_beta, covar_module=self.cov_beta)
+
+        self.controller = controller
+
+    def forward(self, x:torch.Tensor):
+
+        mean_y = + self.train_u * self.mean_beta(x)
+        
+        covar_y = self.cov_alpha(x) + self.U.transpose(0,1) * self.cov_beta(x) * self.U + torch.eye(x.shape[0]) * 1e-6  #TODO
+
+        return gpytorch.distributions.MultivariateNormal(mean_y, covar_y)
+    
+    def alpha(self, _x:torch.Tensor):
+        x = torch.tensor(_x).unsqueeze(0)
+        covar_y = self.cov_alpha(self.train_inputs[0]) + self.U.transpose(0,1) * self.cov_beta(self.train_inputs[0]) * self.U + torch.eye(self.train_inputs[0].shape[0]) * 1e-6
+        alpha = self.cov_alpha(self.train_inputs[0], x ).t() @ covar_y.to_dense().inverse() @ (self.train_targets - self.train_u * self.mean_beta(self.train_inputs[0]))
+        return alpha.detach()
+    
+    def beta(self, _x:torch.Tensor, _u:torch.Tensor):
+        x = torch.tensor(_x).unsqueeze(0)
+        #u = torch.tensor(_u)
+
+        u = torch.tensor(self.controller(_x, _u))#.unsqueeze(0)
+        covar_y = self.cov_alpha(self.train_inputs[0]) + self.U.transpose(0,1) * self.cov_beta(self.train_inputs[0]) * self.U + torch.eye(self.train_inputs[0].shape[0]) * 1e-6
+        beta =  self.mean_beta(x) + u * self.cov_beta(self.train_inputs[0], x).t() @ self.U @  covar_y.to_dense().inverse() @ (self.train_targets - self.train_u * self.mean_beta(self.train_inputs[0]))
+        return beta.detach()

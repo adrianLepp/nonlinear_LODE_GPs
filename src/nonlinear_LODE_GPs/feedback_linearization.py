@@ -3,12 +3,42 @@ import torch
 from result_reporter.latex_exporter import plot_states
 from typing import List
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.integrate import solve_ivp
 
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.lodegp import  optimize_gp, LODEGP
 from nonlinear_LODE_GPs.helpers import Time_Def, ODE_System, simulate_system, Data_Def, downsample_data, load_system
-from nonlinear_LODE_GPs.gp import GP, Linearizing_Control, Linearizing_Control_2, Linearizing_Control_3
+from nonlinear_LODE_GPs.gp import GP, Linearizing_Control, Linearizing_Control_2, Linearizing_Control_4
 
+
+class Controller():
+    def __init__(self, state_dim:int, control_dim:int, a:np.ndarray, v:np.ndarray, alpha=None, beta=None):
+        self.state_dim = state_dim
+        self.control_dim = control_dim
+        self.a = a
+        self.v = v
+        self.alpha = alpha
+        self.beta = beta
+
+        if self.alpha is not None and self.beta is not None:
+            self.type = 'feedback_linearization'
+        else:
+            self.type = 'direct_control'
+
+    def direct_control(self, x:np.ndarray, y_ref:np.ndarray):
+        return  - self.a @ x + self.v * y_ref
+    
+    def feedback_linearization(self, x:np.ndarray, y_ref:np.ndarray):
+        u0 = self.direct_control(x, y_ref)
+        beta =  self.beta(x, u0)
+        return  self.v / beta * y_ref -  (self.alpha(x) + self.a @ x) / beta
+
+    def __call__(self, x:np.ndarray, y_ref:np.ndarray):
+        if self.type == 'feedback_linearization':
+            return self.feedback_linearization(x, y_ref).squeeze()
+        else:
+            return self.direct_control(x, y_ref).squeeze()
 
 class Simulation_Config():
     def __init__(self, time:Time_Def, x_init, u, downsample:int, description:str):
@@ -19,16 +49,35 @@ class Simulation_Config():
         self.description = description
         
 
-
-def get_state_trajectories(system:ODE_System, sim_configs:List[Simulation_Config]):
+def get_state_trajectories(system:ODE_System, sim_configs:List[Simulation_Config], controller:Controller=None):
     '''
     I: simulate the system to get state trajectories dependent on different inital states and control trajectories
     '''
     data = []
     for sim_config in sim_configs:
-        t, x_u= simulate_system(system, sim_config.x_init[0:system.state_dimension], sim_config.time, sim_config.u)
+        if controller is not None:
+            y_ref = np.zeros_like(sim_config.time.linspace())
+            u = np.zeros_like(sim_config.time.linspace())
+        else:
+            u = sim_config.u
+            y_ref = None
+            
+        sol = solve_ivp(
+            system.stateTransition_2, 
+            [sim_config.time.start, sim_config.time.end], 
+            sim_config.x_init[0:system.state_dimension], 
+            method='RK45', 
+            t_eval=sim_config.time.linspace(), 
+            args=(sim_config.time.step, controller, u, y_ref), 
+            max_step=0.01
+        )
+        
+        x_u = np.concatenate((sol.y.transpose(), u.reshape(-1,1)), axis=1)
+        data.append(Data_Def(torch.tensor(sim_config.time.linspace()), torch.tensor(x_u), system.state_dimension, system.control_dimension, sim_config.time, y_names=['x1','x2','u']))
+
+        # t, x_u= simulate_system(system, sim_config.x_init[0:system.state_dimension], sim_config.time, sim_config.u)
         #t, x_u = downsample_data(_t, _x_u, sim_config.downsample)
-        data.append(Data_Def(t, x_u, system.state_dimension, system.control_dimension, y_names=['x1','x2','u']))
+        # data.append(Data_Def(t, x_u, system.state_dimension, system.control_dimension, y_names=['x1','x2','u']))
     return data
 
 def get_linearizing_feedback(gp:LODEGP, sim_configs:List[Simulation_Config], system_data:List[Data_Def], optim_steps:int):
@@ -39,6 +88,7 @@ def get_linearizing_feedback(gp:LODEGP, sim_configs:List[Simulation_Config], sys
     for i, sim_config in enumerate(sim_configs):
         _train_y = system_data[i].y.clone()
         _train_y[:,-1] = torch.nan
+        _train_y[:,1] = torch.nan
         train_x, train_y = downsample_data(system_data[i].time, _train_y, sim_config.downsample)
         gp.set_train_data(train_x, train_y, strict=False)
 
@@ -54,7 +104,7 @@ def get_linearizing_feedback(gp:LODEGP, sim_configs:List[Simulation_Config], sys
 
     return lodegp_data
 
-def get_feedback_controller(sim_configs:List[Simulation_Config], system_data:List[Data_Def], lodegp_data:List[Data_Def], optim_steps:int):
+def get_feedback_controller(sim_configs:List[Simulation_Config], system_data:List[Data_Def], lodegp_data:List[Data_Def], optim_steps:int, controller:Controller):
     '''
     III: use the learned linearizing feedback controller to learn the nonlinearities of the system
     '''
@@ -64,7 +114,8 @@ def get_feedback_controller(sim_configs:List[Simulation_Config], system_data:Lis
 
     for i, sim_config in enumerate(sim_configs):
         _train_x_u = lodegp_data[i].y.clone()
-        _train_x_u[:,-1] = torch.tensor(sim_config.u).squeeze()
+        #_train_x_u[:,-1] = torch.tensor(sim_config.u).squeeze() #FIXME:!!!
+        _train_x_u[:,-1] = system_data[i].y[:,-1].clone()
         _train_y_ref = lodegp_data[i].y[:,-1].clone()
 
         train_y_ref, train_x_u  = downsample_data(_train_y_ref, _train_x_u, sim_config.downsample)
@@ -76,68 +127,68 @@ def get_feedback_controller(sim_configs:List[Simulation_Config], system_data:Lis
 
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
 
-    control_gp = Linearizing_Control_2(# TODO
-        x,
-        u,
-        y_ref,
-        likelihood,
-        consecutive_training=False
-        )
-    control_gp.optimize(optim_steps * 10, verbose=True)
+    # control_gp = Linearizing_Control_2(x, u, y_ref, likelihood, consecutive_training=False)
+    # control_gp.optimize(optim_steps * 10, verbose=True)
+
+    control_gp = Linearizing_Control_4( torch.cat(x, dim=0),torch.cat(y_ref, dim=0),torch.cat(u, dim=0), likelihood, b = 0.1, controller=controller)
+    # control_gp.optimize(optim_steps * 10, verbose=True)
+    optimize_gp(control_gp, optim_steps * 5, verbose=True)
     
     return control_gp
 
-def test_nonlinear_functions(control_gp, sim_configs:List[Simulation_Config], lodegp_data:List[Data_Def]):
-    control_gp.likelihood.eval()
-    control_gp.eval()
-    # control_gp.model.eval()
-    control_gp.alpha.eval()
-    control_gp.beta.eval()
+def test_nonlinear_functions(control_gp, sim_configs:List[Simulation_Config], lodegp_data:List[Data_Def], system:ODE_System):
+    # control_gp.likelihood.eval()
+    # control_gp.eval()
+    # # control_gp.model.eval()
+    # control_gp.alpha.eval()
+    # control_gp.beta.eval()
 
     with torch.no_grad(), gpytorch.settings.fast_pred_var(): # and gpytorch.settings.debug(False):
-        y_ref_output_0 = control_gp.y_ref(lodegp_data[0].y[:,:-1], torch.tensor(sim_configs[0].u.squeeze()))
-        y_ref_output_1 = control_gp.y_ref(lodegp_data[1].y[:,:-1], torch.tensor(sim_configs[1].u.squeeze()))
+        beta = torch.zeros_like(control_gp.train_targets)
+        alpha = torch.zeros_like(control_gp.train_targets)
 
-        # y_ref_output_0 = (control_gp(_u_train_x_0)).mean
-        # y_ref_output_1 = (control_gp(_u_train_x_1)).mean
+        beta_system = torch.zeros_like(control_gp.train_targets)
+        alpha_system = torch.zeros_like(control_gp.train_targets)
 
-        # y_ref_output_0 = (control_gp(_u_train_x_0[:,:-1], _u_train_x_0[:,-1])).mean
-        # y_ref_output_1 = (control_gp(_u_train_x_0[:,:-1], _u_train_x_0[:,-1])).mean
+        for i in range(control_gp.train_targets.shape[0]):
+            beta[i] = control_gp.beta(control_gp.train_inputs[0][i].numpy(), 0)
+            alpha[i] = control_gp.alpha(control_gp.train_inputs[0][i].numpy())
 
-        alpha_0 = (control_gp.alpha(lodegp_data[0].y[:,:-1])).mean
-        alpha_1 = (control_gp.alpha(lodegp_data[1].y[:,:-1])).mean
-        beta_1 = (control_gp.beta(lodegp_data[1].y[:,:-1])).mean
+            beta_system[i] = system.beta(control_gp.train_inputs[0][i].numpy())
+            alpha_system[i] = system.alpha(control_gp.train_inputs[0][i].numpy())
+
+        y_ref = alpha + beta * control_gp.train_u
+        y_ref_system = alpha_system + beta_system * control_gp.train_u
 
     plt.rcParams['text.usetex'] = True
-    fig, (ax1, ax2) = plt.subplots(2, 1)
+    fig, ax = plt.subplots(2, 2)
 
+    ax[0,0].plot(beta, label = r'beta gp')
+    ax[0,0].plot(beta_system, label = r'beta sys')
 
-    ax1.plot(lodegp_data[0].time.numpy(), y_ref_output_0, label = r'$y_{ref,0}(x,u)$')
-    ax1.plot(lodegp_data[0].time.numpy(), lodegp_data[0].y[:,-1], label = r'$y_{ref,lode}(x,u)$')
+    ax[0,1].plot(alpha, label = r'alpha_gp')
+    ax[0,1].plot(alpha_system, label = r'alpha_sys')
 
+    ax[1,0].plot(y_ref, label = r'y_ref gp')
+    ax[1,0].plot(y_ref_system, label = r'y_ref sys')
 
-    ax2.plot(lodegp_data[1].time.numpy(), y_ref_output_1, label = r'$y_{ref,1}(x,u)$')
-    ax2.plot(lodegp_data[1].time.numpy(), alpha_1, label = r'$\alpha_{pred,1}(x)$')
-    ax2.plot(lodegp_data[1].time.numpy(), beta_1, label = r'$\beta_{pred,1}(x)$')
-    ax2.plot(lodegp_data[1].time.numpy(), lodegp_data[1].y[:,-1], label = r'$y_{ref,lode}(x,u)$')
-
-    ax1.set_xlabel('Time [s]')
-    ax1.set_ylabel('Force [N]')
-    ax1.set_title('Control estimation inverted pendulum')
-    ax1.grid(True)
-    ax1.legend()
-    ax2.set_xlabel('Time [s]')
-    ax2.set_ylabel('Force [N]')
-    ax2.set_title('Control estimation inverted pendulum')
-    ax2.grid(True)
-    ax2.legend()
+    ax[0,0].set_xlabel('Time [s]')
+    ax[0,0].set_ylabel('Force [N]')
+    ax[0,0].set_title('Control estimation inverted pendulum')
+    ax[0,0].grid(True)
+    ax[0,0].legend()
+    ax[0,1].set_xlabel('Time [s]')
+    ax[0,1].set_ylabel('Force [N]')
+    ax[0,1].set_title('Control estimation inverted pendulum')
+    ax[0,1].grid(True)
+    ax[0,1].legend()
     return fig
 
-def learn_system_nonlinearities(system_name:str, sim_configs:List[Simulation_Config], optim_steps:int, plot=False):
+def learn_system_nonlinearities(system, sim_configs:List[Simulation_Config], optim_steps:int, plot=False, controller:Controller=None):
     # I
-    system = load_system(system_name, a0=0, a1=0, v=1)
+    # system = load_system(system_name, a0=0, a1=0, v=1)
 
-    system_data = get_state_trajectories(system, sim_configs)
+    system_data = get_state_trajectories(system, sim_configs, controller)
 
     # II
     likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(
@@ -150,7 +201,7 @@ def learn_system_nonlinearities(system_name:str, sim_configs:List[Simulation_Con
     lodegp_data = get_linearizing_feedback(lodegp, sim_configs, system_data, optim_steps)
 
     # III
-    control_gp = get_feedback_controller(sim_configs, system_data, lodegp_data, optim_steps)
+    control_gp = get_feedback_controller(sim_configs, system_data, lodegp_data, optim_steps, controller)
 
     if plot is True:
         data_names = [cfg.description for cfg in sim_configs]
@@ -166,9 +217,9 @@ def learn_system_nonlinearities(system_name:str, sim_configs:List[Simulation_Con
             header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
             title = f'Inverted Pendulum LODE GP.'
         )
-        figure = test_nonlinear_functions(control_gp, sim_configs,lodegp_data)
+        figure = test_nonlinear_functions(control_gp, sim_configs,lodegp_data, system)
 
-        # plt.show()
+        plt.show()
 
     def alpha(x):
         return control_gp.alpha(torch.tensor(x).unsqueeze(0)).mean.clone().detach().numpy()
@@ -180,4 +231,4 @@ def learn_system_nonlinearities(system_name:str, sim_configs:List[Simulation_Con
         # with torch.no_grad:
             # return control_gp.beta(torch.tensor(x).unsqueeze(0)).mean.numpy()
 
-    return alpha, beta
+    return control_gp.alpha, control_gp.beta

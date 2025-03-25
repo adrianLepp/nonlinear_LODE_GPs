@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.helpers import get_config, load_system, Data_Def, Time_Def
-from nonlinear_LODE_GPs.feedback_linearization import Simulation_Config, learn_system_nonlinearities
+from nonlinear_LODE_GPs.feedback_linearization import Simulation_Config, learn_system_nonlinearities, Controller
 from scipy.integrate import solve_ivp
 
 torch.set_default_dtype(torch.float64)
@@ -19,9 +19,8 @@ system_name = "inverted_pendulum"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
-t  = 30
+t  = 10
 optim_steps = 100
-optim_steps_2 = 100
 downsample = 20
 sim_time = Time_Def(0, t, step=0.01)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
@@ -31,29 +30,68 @@ a0 = 2
 a1 = 3
 v = 0
 
-system = load_system(system_name, a0, a1, v)
+system = load_system(system_name, a0=0, a1=0, v=1)
+controller_0 = Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]))
+# controller_0 = None
+
+
+'''
+
+y_ref = np.zeros_like(sim_time.linspace())
+u = np.zeros_like(sim_time.linspace())
+sol = solve_ivp(system.stateTransition_2, [sim_time.start, sim_time.end], [np.pi/2 , 0], method='RK45', t_eval=sim_time.linspace(), args=(sim_time.step, controller_0, u, y_ref), max_step=0.01)
+x_u = np.concatenate((sol.y.transpose(), u.reshape(-1,1)), axis=1)
+
+simple_ctrl_data = Data_Def(sim_time.linspace(), x_u, system.state_dimension, system.control_dimension, sim_time)
+
+controller_1 = Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]), alpha=system.alpha, beta=system.beta)
+y_ref = np.zeros_like(sim_time.linspace())
+u = np.zeros_like(sim_time.linspace())
+sol = solve_ivp(system.stateTransition_2, [sim_time.start, sim_time.end], [np.pi/2 , 0], method='RK45', t_eval=sim_time.linspace(), args=(sim_time.step, controller_1, u, y_ref), max_step=0.01)
+x_u = np.concatenate((sol.y.transpose(), u.reshape(-1,1)), axis=1)
+
+simple_ctrl_data_1 = Data_Def(sim_time.linspace(), x_u, system.state_dimension, system.control_dimension, sim_time)
+
+plot_states([simple_ctrl_data, simple_ctrl_data_1], data_names=['sim', 'feedback'], header=['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [rad]', 'Angular Velocity [rad/s]', 'Force [N]'], title='Inverted Pendulum Simulation')
+plt.show()
+'''
 
 sim_configs = [
-    Simulation_Config(sim_time, [np.pi/2 - 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [np.pi/2 + 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.ones((sim_time.count,1)), downsample, 'u=1'),
-    Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.ones((sim_time.count,1)), downsample, 'u=-1'),
+    # Simulation_Config(sim_time, [np.pi/2 - 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [np.pi/2 + 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    #Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.ones((sim_time.count,1)), downsample, 'u=1'),
+    #Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.ones((sim_time.count,1)), downsample, 'u=-1'),
     # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()), downsample, 'sin'),
     # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.sin(sim_time.linspace()), downsample, '-sin'),
     # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()**2/4), downsample, 'sin^2'),
+    Simulation_Config(sim_time, [np.pi/2  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [np.pi/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [-np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [-np.pi/2 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [-3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
 ]
 
-alpha, beta = learn_system_nonlinearities(system_name, sim_configs, optim_steps, plot=True)
+alpha, beta = learn_system_nonlinearities(system, sim_configs, optim_steps, plot=True, controller=controller_0)
 
-plt.show()
+# plt.show()
 
-system_2 = load_system(system_name, a0=a0, a1=a1, v=v)
+# system_2 = load_system(system_name, a0=a0, a1=a1, v=v)
 
-system_2._alpha = system_2.alpha
-system_2._beta = system_2.beta
+v = 0
 
-system_2.alpha = alpha
-system_2.beta = beta
+test_controller = [
+    Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]), alpha=alpha, beta=beta),
+    Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]), alpha=system.alpha, beta=system.beta),
+]
+
+# system_2._alpha = system_2.alpha
+# system_2._beta = system_2.beta
+
+# system_2.alpha = alpha
+# system_2.beta = beta
 
 sim_time_u = Time_Def(0, t/2, step=0.01)
 
@@ -64,30 +102,33 @@ ts = sim_time_u.linspace()
 
 control_data = []
 for j in range(2):
-    if j ==1:
-        system_2.alpha = system_2._alpha
-        system_2.beta = system_2._beta
+    # if j ==1:
+    #     system_2.alpha = system_2._alpha
+    #     system_2.beta = system_2._beta
 
+    u_control = np.zeros_like(ts)
     sol = solve_ivp(
-        system_2.stateTransition_2, 
+        system.stateTransition_2, 
         [sim_time_u.start, sim_time_u.end], 
-        x_0[0:system_2.state_dimension], 
+        x_0[0:system.state_dimension], 
         method='RK45', 
-        t_eval=ts, args=(y_ref_control,sim_time_u.step)
+        t_eval=ts, args=(sim_time.step, test_controller[j], u_control, y_ref_control),
+        max_step=0.01
     )
     x = sol.y.transpose()
 
     solution = []
     for i in range (x.shape[1]):
         solution.append(x[:,i])
-    solution.append(y_ref_control)
+    #solution.append(y_ref_control)
 
+    solution.append(u_control)
     control_y = np.stack(solution, -1)
 
-    for i in range(len(ts)):
-        control_y[i,-1] = system_2.get_control_from_latent(y_ref_control[i], control_y[i,0:2])
+    # for i in range(len(ts)):
+    #     control_y[i,-1] = system_2.get_control_from_latent(y_ref_control[i], control_y[i,0:2])
 
-    control_data.append(Data_Def(ts.numpy(), control_y, system_2.state_dimension, system_2.control_dimension, sim_time_u))
+    control_data.append(Data_Def(ts.numpy(), control_y, system.state_dimension, system.control_dimension, sim_time_u))
 
 # control_data.y = system.rad_to_deg(control_data.y)
 # control_data.y = system.rad_to_deg(control_data.y) FIXME
@@ -98,6 +139,9 @@ fig_results = plot_states(
     header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
     title = f'Inverted Pendulum GP Control: a0: {a0}, a1: {a1}, v: {v}'
     )
+
+plt.figure()
+plt.plot(control_data[0].y[:,0],control_data[0].y[:,1])
 
 plt.show()
 

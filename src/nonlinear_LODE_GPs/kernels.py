@@ -22,6 +22,7 @@ from linear_operator import to_linear_operator
 import random
 import einops
 import pprint
+from linear_operator.operators import DiagLinearOperator, ConstantDiagLinearOperator
 from typing import List
 torch_operations = {'mul': torch.mul, 'add': torch.add,
                     'pow': torch.pow, 'exp':torch.exp,
@@ -533,3 +534,57 @@ def translate_kernel_matrix_to_gpytorch_kernel(kernelmatrix, paramdict, common_t
 
 
     return kernel_call_matrix
+
+
+
+class Feedback_Control_Kernel(Kernel):
+    def __init__(
+            self, 
+            cov_alpha:Kernel, 
+            cov_beta:Kernel,
+            u_train:torch.Tensor,
+            active_dims=None
+        ):
+        super(Feedback_Control_Kernel, self).__init__(active_dims=active_dims)
+        self.num_tasks = 3
+        self.u_train = ConstantDiagLinearOperator(u_train.squeeze())
+        
+
+        task_range = range(self.num_tasks)
+
+        K = [[None for j in task_range] for i in task_range]
+
+        K[0][0] = cov_alpha
+        K[0][1] = Zero_Kernel()
+        K[0][2] = cov_alpha
+
+        K[1][1] = cov_beta
+        K[1][0] = Zero_Kernel()
+        K[1][2] = cov_beta * self.u_train #TODO
+
+        K[2][0] = cov_alpha
+        K[2][1] = cov_beta #TODO
+        K[2][2] = cov_alpha + cov_beta #TODO
+
+        self.K = K
+
+    def forward(self, x1, x2, diag=False, last_dim_is_batch=False, **params):
+        if last_dim_is_batch:
+            raise RuntimeError("MultitaskKernel does not accept the last_dim_is_batch argument.")
+        
+        K_list = list() 
+        for row in self.K:
+            for kernel in row:
+                K_list.append(kernel(x1, x2, diag=False, last_dim_is_batch=False, **params).to_dense())
+        # from https://discuss.pytorch.org/t/how-to-interleave-two-tensors-along-certain-dimension/11332/6
+        #if K_list[0].ndim == 1:
+        #    K_list = [kk.unsqueeze(1) for kk in K_list]
+        K = einops.rearrange(K_list, '(t1 t2) h w -> (h t1) (w t2)', t1=self.num_tasks, t2=self.num_tasks)
+        return K
+    
+    def num_outputs_per_input(self, x1, x2):
+        """
+        Given `n` data points `x1` and `m` datapoints `x2`, this multitask
+        kernel returns an `(n*num_tasks) x (m*num_tasks)` covariance matrix.
+        """
+        return self.num_tasks
