@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.helpers import get_config, load_system, Data_Def, Time_Def
 from nonlinear_LODE_GPs.feedback_linearization import Simulation_Config, learn_system_nonlinearities, Controller
+from nonlinear_LODE_GPs.gp import Linearizing_Control_2, Linearizing_Control_4
 from scipy.integrate import solve_ivp
 
 torch.set_default_dtype(torch.float64)
@@ -31,8 +32,8 @@ a1 = 3
 v = 0
 
 system = load_system(system_name, a0=0, a1=0, v=1)
-controller_0 = Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]))
-# controller_0 = None
+controller_0 = Controller(system.state_dimension, system.control_dimension, a=np.array([a0/2, a1/2]), v=np.array([v]))
+controller_0 = None
 
 
 '''
@@ -59,11 +60,14 @@ plt.show()
 sim_configs = [
     # Simulation_Config(sim_time, [np.pi/2 - 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
     # Simulation_Config(sim_time, [np.pi/2 + 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    #Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.ones((sim_time.count,1)), downsample, 'u=1'),
-    #Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.ones((sim_time.count,1)), downsample, 'u=-1'),
+    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.ones((sim_time.count,1)), downsample, 'u=1'),
+    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.ones((sim_time.count,1)), downsample, 'u=-1'),
+
     # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()), downsample, 'sin'),
     # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.sin(sim_time.linspace()), downsample, '-sin'),
     # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()**2/4), downsample, 'sin^2'),
+
+
     Simulation_Config(sim_time, [np.pi/2  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
     Simulation_Config(sim_time, [np.pi/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
     Simulation_Config(sim_time, [-np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
@@ -74,7 +78,23 @@ sim_configs = [
     Simulation_Config(sim_time, [-3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
 ]
 
-alpha, beta = learn_system_nonlinearities(system, sim_configs, optim_steps, plot=True, controller=controller_0)
+control_gp_kwargs = {
+    #Linearizing_Control_2
+    'consecutive_training':False,
+    #Linearizing_Control_4
+    'b' : 0.1,
+    'controller':controller_0
+}
+
+alpha, beta = learn_system_nonlinearities(
+    system, 
+    sim_configs, 
+    optim_steps, 
+    ControlGP_Class = Linearizing_Control_2,
+    controlGP_kwargs = control_gp_kwargs,
+    plot=True, 
+    controller=controller_0,
+    )
 
 # plt.show()
 
