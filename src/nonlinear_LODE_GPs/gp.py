@@ -132,8 +132,11 @@ class Linearizing_Control_2(torch.nn.Module):
             self.train_u = torch.cat(train_u, dim=0)
             self.train_y = torch.cat(train_y, dim=0)
 
-            self._alpha = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood())#, mean_module=gpytorch.means.ZeroMean())
-            self._beta = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood())#, covar_module=gpytorch.kernels.ConstantKernel())
+            self.train_targets = torch.cat(train_y, dim=0)
+            self.train_inputs = [torch.cat(train_x, dim=0)]
+            
+            self._alpha = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2)))#, mean_module=gpytorch.means.ZeroMean())
+            self._beta = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2)))#, covar_module=gpytorch.kernels.ConstantKernel())
 
     def optimize(self, training_iterations=100, verbose=False):
         if self.consecutive:
@@ -147,50 +150,28 @@ class Linearizing_Control_2(torch.nn.Module):
         self._beta.train()
         self._beta.likelihood.train()
 
-        # 2 Optimizers
-        # optimizer_alpha = torch.optim.Adam(self._alpha.parameters(), lr=0.1)
-        # optimizer_beta = torch.optim.Adam(self._beta.parameters(), lr=0.3)
-
         optimizer = torch.optim.Adam(list(self._alpha.parameters()) + list(self._beta.parameters()), lr=0.1)
-
-        # 2 marginal log likelihoods
-        mll_alpha = gpytorch.mlls.ExactMarginalLogLikelihood(self._alpha.likelihood, self._alpha)
-        mll_beta = gpytorch.mlls.ExactMarginalLogLikelihood(self._beta.likelihood, self._beta)
-
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self._alpha) # TODO: Does alpha or beta matter here?
-
 
         training_loss = [] 
         for i in range(training_iterations): 
             optimizer.zero_grad()
-            # optimizer_alpha.zero_grad()
-            # optimizer_beta.zero_grad()
 
             output_alpha = self._alpha(self.train_x)
             output_beta = self._beta(self.train_x)
+            output = y_ref_from_alpha_beta(output_alpha, output_beta, self.train_u)    
 
-            output = y_ref_from_alpha_beta(output_alpha, output_beta, self.train_u)
-
-            # 2 losses
-            # loss_alpha = -mll_alpha(output_alpha, self.train_y - output_beta.mean * self.train_u)
-            # loss_beta = -mll_beta(output_beta, self.train_y - output_alpha.mean)
-            # loss = loss_alpha + loss_beta
-            
             loss = -mll(output, self.train_y )
-
-            # loss_alpha.backward()
-            # loss_beta.backward()
             loss.backward()
 
             if verbose is True:
                 print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, (loss.item())))
             
-            # 2 optimizers
-            # optimizer_alpha.step()
-            # optimizer_beta.step()
             optimizer.step()
 
-            # training_loss.append(loss.item())      
+            training_loss.append(loss.item())
+
+        return training_loss 
 
 
     def optimize_consecutive(self, training_iterations=100, verbose=False):
@@ -441,7 +422,7 @@ class LinearizingContorl_DeepGP(DeepGP):
 
 
 class Linearizing_Control_4(gpytorch.models.ExactGP):
-    def __init__(self, x:torch.Tensor, u:torch.Tensor, y_ref:torch.Tensor,  likelihood, b:float, controller, **kwargs):
+    def __init__(self, x:torch.Tensor, u:torch.Tensor, y_ref:torch.Tensor,  likelihood, b:float, controller, variance, **kwargs):
         train_x = torch.cat(x, dim=0)
         train_u = torch.cat(u, dim=0)
         train_y = torch.cat(y_ref, dim=0)
@@ -449,6 +430,7 @@ class Linearizing_Control_4(gpytorch.models.ExactGP):
         
         self.train_u = train_u
         self.U = DiagLinearOperator(self.train_u)
+        self.Var = DiagLinearOperator(torch.cat(variance, dim=0))
 
         self.cov_alpha = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2))
         self.cov_beta = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2))
@@ -465,17 +447,23 @@ class Linearizing_Control_4(gpytorch.models.ExactGP):
 
     def optimize(self, optim_steps:int, verbose:bool):
         return optimize_gp(self, optim_steps, verbose)
+    
+    def covar_alpha_beta(self, x:torch.Tensor):
+        return self.cov_alpha(x) + self.U.transpose(0,1) * self.cov_beta(x) * self.U + self.Var
 
     def forward(self, x:torch.Tensor):
 
         mean_y = + self.train_u * self.mean_beta(x)
-        covar_y = self.cov_alpha(x) + self.U.transpose(0,1) * self.cov_beta(x) * self.U + torch.eye(x.shape[0]) * 1e-6  #TODO
+        #covar_y = self.cov_alpha(x) + self.U.transpose(0,1) * self.cov_beta(x) * self.U + self.Var #torch.eye(x.shape[0]) * 1e-6  #TODO
+        covar_y = self.covar_alpha_beta(x)
 
         return gpytorch.distributions.MultivariateNormal(mean_y, covar_y)
     
     def alpha(self, _x:torch.Tensor):
         x = torch.tensor(_x).unsqueeze(0)
-        covar_y = self.cov_alpha(self.train_inputs[0]) + self.U.transpose(0,1) * self.cov_beta(self.train_inputs[0]) * self.U + torch.eye(self.train_inputs[0].shape[0]) * 1e-6
+        # covar_y = self.cov_alpha(self.train_inputs[0]) + self.U.transpose(0,1) * self.cov_beta(self.train_inputs[0]) * self.U + torch.eye(self.train_inputs[0].shape[0]) * 1e-6
+        covar_y = self.covar_alpha_beta(self.train_inputs[0])
+
         alpha = self.cov_alpha(self.train_inputs[0], x ).t() @ covar_y.to_dense().inverse() @ (self.train_targets - self.train_u * self.mean_beta(self.train_inputs[0]))
         return alpha.detach()
     
@@ -483,7 +471,8 @@ class Linearizing_Control_4(gpytorch.models.ExactGP):
         x = torch.tensor(_x).unsqueeze(0)
 
         u = torch.tensor(self.controller(_x, _u))#.unsqueeze(0)
-        covar_y = self.cov_alpha(self.train_inputs[0]) + self.U.transpose(0,1) * self.cov_beta(self.train_inputs[0]) * self.U + torch.eye(self.train_inputs[0].shape[0]) * 1e-6
+        # covar_y = self.cov_alpha(self.train_inputs[0]) + self.U.transpose(0,1) * self.cov_beta(self.train_inputs[0]) * self.U + torch.eye(self.train_inputs[0].shape[0]) * 1e-6
+        covar_y = self.covar_alpha_beta(self.train_inputs[0])
         beta =  self.mean_beta(x) + u * self.cov_beta(self.train_inputs[0], x).t() @ self.U @  covar_y.to_dense().inverse() @ (self.train_targets - self.train_u * self.mean_beta(self.train_inputs[0]))
         return beta.detach()
     

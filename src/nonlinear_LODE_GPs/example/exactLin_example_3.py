@@ -32,8 +32,7 @@ a1 = 3
 v = 0
 
 system = load_system(system_name, a0=0, a1=0, v=1)
-controller_0 = Controller(system.state_dimension, system.control_dimension, a=np.array([a0/2, a1/2]), v=np.array([v]))
-controller_0 = None
+controller_0 = Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]))
 
 
 '''
@@ -78,6 +77,8 @@ sim_configs = [
     Simulation_Config(sim_time, [-3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
 ]
 
+# controller_0 = None
+
 control_gp_kwargs = {
     #Linearizing_Control_2
     'consecutive_training':False,
@@ -90,7 +91,7 @@ alpha, beta = learn_system_nonlinearities(
     system, 
     sim_configs, 
     optim_steps, 
-    ControlGP_Class = Linearizing_Control_2,
+    ControlGP_Class = Linearizing_Control_4,
     controlGP_kwargs = control_gp_kwargs,
     plot=True, 
     controller=controller_0,
@@ -114,7 +115,7 @@ test_controller = [
 # system_2.alpha = alpha
 # system_2.beta = beta
 
-sim_time_u = Time_Def(0, t/2, step=0.01)
+sim_time_u = Time_Def(0, t*1.5, step=0.01)
 
 x_0 = np.array([ np.pi/2, 0 ,0])
 
@@ -168,6 +169,7 @@ plt.plot(control_data[2].y[:,0],control_data[2].y[:,1], label='Simple')
 plt.xlabel('Angle [rad]')
 plt.ylabel('Angular Velocity [rad/s]')
 plt.legend()
+plt.grid(True)
 
 plt.show()
 

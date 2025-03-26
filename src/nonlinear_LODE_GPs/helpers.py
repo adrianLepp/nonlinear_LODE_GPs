@@ -433,7 +433,10 @@ def save_everything(
     pass
 
 def downsample_data(t:torch.Tensor, y:torch.Tensor, factor=10):
-    t_redux = t.clone()[::factor]
+    if t is not None:
+        t_redux = t.clone()[::factor]
+    else:
+        t_redux = None
     y_redux = y.clone()[::factor,:]
     
     return t_redux, y_redux 
