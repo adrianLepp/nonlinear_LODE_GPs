@@ -85,6 +85,7 @@ v = 0
 test_controller = [
     Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]), alpha=alpha, beta=beta),
     Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]), alpha=system.alpha, beta=system.beta),
+    controller_0
 ]
 
 # system_2._alpha = system_2.alpha
@@ -101,7 +102,7 @@ y_ref_control = np.zeros((sim_time_u.count))
 ts = sim_time_u.linspace()
 
 control_data = []
-for j in range(2):
+for j in range(len(test_controller)):
     # if j ==1:
     #     system_2.alpha = system_2._alpha
     #     system_2.beta = system_2._beta
@@ -135,13 +136,18 @@ for j in range(2):
 
 fig_results = plot_states(
     control_data,
-    data_names = ['Sim_gp', "sim"], 
+    data_names = ['Sim_gp', "sim", 'simple'], 
     header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
     title = f'Inverted Pendulum GP Control: a0: {a0}, a1: {a1}, v: {v}'
     )
 
 plt.figure()
-plt.plot(control_data[0].y[:,0],control_data[0].y[:,1])
+plt.plot(control_data[0].y[:,0],control_data[0].y[:,1], label='GP')
+plt.plot(control_data[1].y[:,0],control_data[1].y[:,1], label='Feedback')
+plt.plot(control_data[2].y[:,0],control_data[2].y[:,1], label='Simple')
+plt.xlabel('Angle [rad]')
+plt.ylabel('Angular Velocity [rad/s]')
+plt.legend()
 
 plt.show()
 
