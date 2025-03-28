@@ -102,7 +102,9 @@ class Linearizing_Control_2(torch.nn.Module):
         ):
         super().__init__()
 
-        self.likelihood = likelihood
+        # self.likelihood = likelihood
+
+        self.likelihood = MultiOutputLikelihood(likelihood)
 
         self.consecutive = consecutive_training
 
@@ -135,8 +137,14 @@ class Linearizing_Control_2(torch.nn.Module):
             self.train_targets = torch.cat(train_y, dim=0)
             self.train_inputs = [torch.cat(train_x, dim=0)]
             
-            self._alpha = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2)))#, mean_module=gpytorch.means.ZeroMean())
-            self._beta = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2)))#, covar_module=gpytorch.kernels.ConstantKernel())
+            self._alpha = GP(self.train_x, self.train_y, 
+                             #gpytorch.likelihoods.GaussianLikelihood(), 
+                             self.likelihood,
+                             gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2)))#, mean_module=gpytorch.means.ZeroMean())
+            self._beta = GP(self.train_x, self.train_y, 
+                            # gpytorch.likelihoods.GaussianLikelihood(), 
+                            self.likelihood,
+                            gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2)))#, covar_module=gpytorch.kernels.ConstantKernel())
 
     def optimize(self, training_iterations=100, verbose=False):
         if self.consecutive:
@@ -159,7 +167,11 @@ class Linearizing_Control_2(torch.nn.Module):
 
             output_alpha = self._alpha(self.train_x)
             output_beta = self._beta(self.train_x)
-            output = y_ref_from_alpha_beta(output_alpha, output_beta, self.train_u)    
+
+            output = self.likelihood(output_alpha, output_beta, self.train_u)
+
+
+            # output = y_ref_from_alpha_beta(output_alpha, output_beta, self.train_u)    
 
             loss = -mll(output, self.train_y )
             loss.backward()
@@ -171,6 +183,20 @@ class Linearizing_Control_2(torch.nn.Module):
 
             training_loss.append(loss.item())
 
+        self._alpha.eval()
+        self._alpha.likelihood.eval()
+        self._beta.eval()
+        self._beta.likelihood.eval()
+
+        print("\n----------------------------------------------------------------------------------\n")
+        print('Trained model parameters:')
+        named_parameters = list(self.named_parameters())
+        param_conversion = torch.nn.Softplus()
+
+        for j in range(len(named_parameters)):
+            print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+            # print(named_parameters[j][0], (named_parameters[j][1].data)) #.item()
+        print("\n----------------------------------------------------------------------------------\n")
         return training_loss 
 
 
@@ -478,3 +504,78 @@ class Linearizing_Control_4(gpytorch.models.ExactGP):
     
     def get_nonlinear_fcts(self):
         return self.alpha, self.beta
+
+
+
+#TODO
+class MultiOutputGPModel(gpytorch.models.ExactGP):
+    def __init__(self, _train_x:List[torch.Tensor], _train_u:List[torch.Tensor], _train_y:List[torch.Tensor], _likelihood:gpytorch.likelihoods.Likelihood, **kwargs):
+        train_x = torch.cat(_train_x, dim=0)
+        train_u = torch.cat(_train_u, dim=0)
+        train_y = torch.cat(_train_y, dim=0)
+        self.train_u = train_u
+
+        likelihood = MultiOutputLikelihood()
+
+
+        super().__init__(train_x, train_y, likelihood)
+
+        self.alpha = GP(self.train_x, self.train_y, gpytorch.likelihoods.GaussianLikelihood(), mean_module=gpytorch.means.ZeroMean())
+
+
+        self.mean_alpha = gpytorch.means.ConstantMean()
+        self.mean_beta = gpytorch.means.ConstantMean()
+        self.cov_alpha = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2))
+        self.cov_beta = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2))
+
+    def forward(self, x):
+        alpha_gp = gpytorch.distributions.MultivariateNormal(self.mean_alpha(x), self.cov_alpha(x))
+        beta_gp = gpytorch.distributions.MultivariateNormal(self.mean_beta(x), self.cov_beta(x))
+        return alpha_gp, beta_gp
+    
+    def optimize(self, optim_steps:int, verbose:bool):
+        self.train()
+        self.likelihood.train()
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.1)
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
+
+        for i in range(100):
+            optimizer.zero_grad()
+            f_pred, g_pred = self(self.train_inputs[0])
+            output = self.likelihood(f_pred, g_pred, self.train_u)
+            loss = -mll(output, self.train_targets.squeeze())
+            loss.backward()
+            optimizer.step()
+
+    def get_nonlinear_fcts(self):
+        def alpha(x):
+            self.eval()
+            with torch.no_grad():
+                alpha_pred, _ = self(x)  # Only f(x)
+            return alpha_pred.mean, alpha_pred.variance.sqrt()
+            # alpha_gp = gpytorch.distributions.MultivariateNormal(self.mean_alpha(x), self.cov_alpha(x))
+            # return alpha_gp.mean
+
+        def beta(x, u):
+            self.eval()
+            with torch.no_grad():
+                _, beta_pred = self(x)  # Only f(x)
+            return beta_pred.mean, beta_pred.variance.sqrt()
+            # beta_gp = gpytorch.distributions.MultivariateNormal(self.mean_beta(x), self.cov_beta(x))
+            # return beta_gp.mean
+
+        return alpha, beta
+
+class MultiOutputLikelihood(gpytorch.likelihoods._GaussianLikelihoodBase):
+    def __init__(self, base_likelihoood:gpytorch.likelihoods.Likelihood=None):
+        noise_covar = gpytorch.likelihoods.noise_models.HomoskedasticNoise(
+            # noise_prior=noise_prior, noise_constraint=noise_constraint, batch_shape=batch_shape
+        )
+        super().__init__(noise_covar=noise_covar)
+        self.noise = base_likelihoood if base_likelihoood is not None else gpytorch.likelihoods.GaussianLikelihood()
+        # self.noise = gpytorch.likelihoods.GaussianLikelihood() #TODO: replace with heteroscedastic noise
+
+    def forward(self, alpha_gp:gpytorch.distributions.Distribution, beta_gp:gpytorch.distributions.Distribution, u:torch.Tensor):
+        mean_y = alpha_gp.mean + beta_gp.mean * u.squeeze(-1)
+        cov_y = alpha_gp.covariance_matrix + (u @ u.T) * beta_gp.covariance_matrix
+        return gpytorch.distributions.MultivariateNormal(mean_y, cov_y + torch.eye(len(mean_y)) * self.noise.noise) #TODO: noise_covar or noise

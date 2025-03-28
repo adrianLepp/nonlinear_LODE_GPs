@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.helpers import get_config, load_system, Data_Def, Time_Def
 from nonlinear_LODE_GPs.feedback_linearization import Simulation_Config, learn_system_nonlinearities, Controller
-from nonlinear_LODE_GPs.gp import Linearizing_Control_2, Linearizing_Control_4
+from nonlinear_LODE_GPs.gp import Linearizing_Control_2, Linearizing_Control_4, MultiOutputGPModel
 from scipy.integrate import solve_ivp
 
 torch.set_default_dtype(torch.float64)
@@ -57,24 +57,24 @@ plt.show()
 '''
 
 sim_configs = [
-    # Simulation_Config(sim_time, [np.pi/2 - 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [np.pi/2 + 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.ones((sim_time.count,1)), downsample, 'u=1'),
-    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.ones((sim_time.count,1)), downsample, 'u=-1'),
+    Simulation_Config(sim_time, [np.pi/2 - 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [np.pi/2 + 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.ones((sim_time.count,1)), downsample, 'u=1'),
+    Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.ones((sim_time.count,1)), downsample, 'u=-1'),
 
     # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()), downsample, 'sin'),
     # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.sin(sim_time.linspace()), downsample, '-sin'),
     # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()**2/4), downsample, 'sin^2'),
 
 
-    Simulation_Config(sim_time, [np.pi/2  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [np.pi/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [-np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [-np.pi/2 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [-3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [np.pi/2  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [np.pi/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [-np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [-np.pi/2 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [-3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
 ]
 
 # controller_0 = None
@@ -84,17 +84,17 @@ control_gp_kwargs = {
     'consecutive_training':False,
     #Linearizing_Control_4
     'b' : 0.1,
-    'controller':controller_0
+    'controller':None #TODO controller_0
 }
 
 alpha, beta = learn_system_nonlinearities(
     system, 
     sim_configs, 
     optim_steps, 
-    ControlGP_Class = Linearizing_Control_4,
+    ControlGP_Class = Linearizing_Control_2,
     controlGP_kwargs = control_gp_kwargs,
     plot=True, 
-    controller=controller_0,
+    controller=None, #TODO
     )
 
 # plt.show()
@@ -115,7 +115,7 @@ test_controller = [
 # system_2.alpha = alpha
 # system_2.beta = beta
 
-sim_time_u = Time_Def(0, t*1.5, step=0.01)
+sim_time_u = Time_Def(0, t*0.5, step=0.01)
 
 x_0 = np.array([ np.pi/2, 0 ,0])
 
