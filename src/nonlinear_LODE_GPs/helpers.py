@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import json
 from typing import List
 from result_reporter.sqlite import add_modelConfig, add_simulationConfig, add_simulation_data, add_training_data, get_training_data, get_model_config, add_reference_data
+from result_reporter.latex_exporter import plot_loss
+import pandas as pd
 
 default_config ='config.json'
 class Time_Def():
@@ -269,8 +271,6 @@ def plot_results(train:Data_Def, test:Data_Def,  ref:Data_Def = None, equilibriu
     #ax2.legend()
     ax1.grid(True)
 
-    plt.show()
-
 
 def save_results(
         model, 
@@ -361,7 +361,6 @@ def plot_weights(x, weights, title="Weighting Function"):
     plt.xlabel("t")
     plt.ylabel("Weight")
     #plt.title(title)
-    plt.show()
 
 
 def get_config(system_name:str, config_file:str=default_config, save:bool=False):
@@ -440,3 +439,23 @@ def downsample_data(t:torch.Tensor, y:torch.Tensor, factor=10):
     y_redux = y.clone()[::factor,:]
     
     return t_redux, y_redux 
+
+
+
+class LossTracker:
+    def __init__(self, file_name: str):
+        self.file_name = file_name
+        try:
+            self.df = pd.read_csv(file_name)
+        except FileNotFoundError:
+            self.df = pd.DataFrame()
+
+    def add_loss(self, model_name: str, losses: list):
+        self.df[model_name] = losses
+
+    def to_csv(self):
+        self.df.to_csv(self.file_name, index=False)
+
+    def plot_losses(self):
+        loss_dict = self.df.to_dict(orient='list')
+        return plot_loss(loss_dict)

@@ -125,7 +125,7 @@ class KL_Divergence_Weight(gpytorch.Module):
         super(KL_Divergence_Weight, self).__init__()
         self.ignore_control = True #FIXME
         self.center = center
-        self.alpha = 0.5 #TODO This should be learned
+        self.alpha = 0.001 #TODO This should be learned. 0.5 for localgp
 
 
         self.register_parameter(
@@ -166,7 +166,7 @@ class KL_Divergence_Weight(gpytorch.Module):
         center = self.center[:,:-1] 
         N = dist.mean.shape[0]
         num_tasks = 3
-        reduced_covar = dist.covariance_matrix.reshape(N,num_tasks,N,num_tasks)[:,:-1,:,:-1].reshape(N*(num_tasks-1),N*(num_tasks-1))
+        reduced_covar = dist.covariance_matrix.reshape(N,num_tasks,N,num_tasks)[:,:-1,:,:-1].reshape(N*(num_tasks-1),N*(num_tasks-1)) + torch.eye(N*(num_tasks-1))*1e-6
         reduced_mean = dist.mean[:,:-1]
         reduced_dist = gpytorch.distributions.MultitaskMultivariateNormal(reduced_mean, reduced_covar)
         center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center.tile(N,1), reduced_covar)
@@ -192,3 +192,76 @@ class KL_Divergence_Weight(gpytorch.Module):
         # weight = torch.exp(-divergence/self.length).transpose(0,1)
         weight = 1 / (self.alpha* divergence + 1).unsqueeze(1)
         return weight
+    
+
+class Epanechnikov_Weight(gpytorch.Module):
+    def __init__(self, center:torch.Tensor, length_prior=None, length_constraint=None,):
+        super(Epanechnikov_Weight, self).__init__()
+        self.center = center
+        self.lengthscale = length_prior
+
+
+        self.register_parameter(
+            #name='raw_length', parameter=torch.nn.Parameter(torch.zeros(*self.batch_shape, 1, 1))
+            name='raw_length', parameter=torch.nn.Parameter(torch.ones(1, 1, requires_grad=False))
+        )
+        
+        # if length_constraint is None:
+        #     length_constraint = gpytorch.constraints.Positive()
+
+        if length_constraint is not None:
+            self.register_constraint("raw_length", length_constraint)
+        
+        if length_prior is not None:
+            self.register_prior(
+                "length_prior",
+                length_prior,
+                lambda m: m.length,
+                lambda m, v : m._set_length(v),
+            )
+
+    @property
+    def length(self):
+        if hasattr(self, "raw_length_constraint"):
+            return self.raw_length_constraint.transform(self.raw_length)
+        return self.raw_length
+        return self.raw_length_constraint.transform(self.raw_length)
+
+    @length.setter
+    def length(self, value):
+        return self._set_length(value)
+
+    def _set_length(self, value):
+        if not torch.is_tensor(value):
+            value = torch.as_tensor(value).to(self.raw_length)
+        if hasattr(self, "raw_length_constraint"):
+            self.initialize(raw_length=self.raw_length_constraint.inverse_transform(value))
+        else:
+            self.initialize(raw_length=value)
+
+    def forward(self, x:gpytorch.distributions.Distribution):
+        center = self.center
+
+        if isinstance(x, gpytorch.distributions.Distribution):
+            x = x.mean
+        
+        const = torch.tensor(0.03)
+        factor = torch.sqrt(const)
+        unitless_sq_dist = self.covar_dist(x, center, square_dist=True)
+        mask = torch.where(unitless_sq_dist > const, torch.tensor(0.0, device=unitless_sq_dist.device), torch.tensor(1.0, device=unitless_sq_dist.device))
+
+        epachnikov = 3 / (4 * factor) * (1-unitless_sq_dist.div(const))
+        return epachnikov * mask
+    
+    def covar_dist(
+        self,
+        x1: torch.Tensor,
+        x2: torch.Tensor,
+        square_dist: bool = False,
+        **params,
+    ) -> torch.Tensor:
+        
+
+        x1_eq_x2 = torch.equal(x1, x2)
+        dist_func = sq_dist if square_dist else dist
+        return dist_func(x1, x2, x1_eq_x2)

@@ -20,12 +20,13 @@ SAVE = True
 
 
 system_name = "nonlinear_watertank"
+loss_file = '../data/losses/equilibrium_se.csv'
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 t  = 100
 optim_steps = 300
-downsample = 10
+downsample = 100 # TODO  100 50 10
 sim_time = Time_Def(0, t, step=0.1)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
 test_time = Time_Def(0, t-0, step=0.1)
@@ -157,9 +158,14 @@ error_data_de = error_de.to_report_data()
 # plot_results(train_data, test_data, ref_data)
 
 
-fig_loss = plot_loss(training_loss)
+# fig_loss = plot_loss(training_loss)
+loss_tracker = LossTracker(loss_file)
+
+# loss_tracker.add_loss(f'D = {train_time.count}', training_loss)
+fig_loss = loss_tracker.plot_losses()
+loss_tracker.to_csv()
 fig_error = plot_error(error_data_gp, error_data_de, ['x1', 'x2', 'u1'])
-fig_results = plot_states(train_data, test_data, ref_data, ['x1', 'x2', 'u1'])
+fig_results = plot_states([test_data, ref_data, train_data])
 plt.show()
 
 if SAVE:

@@ -16,16 +16,17 @@ from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = False
+SAVE = True
 
 
 system_name = "nonlinear_watertank"
+loss_file = '../data/losses/equilibrium.csv'
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 t  = 100
 optim_steps = 300
-downsample = 10
+downsample = 100 # TODO  100 50 10
 sim_time = Time_Def(0, t, step=0.1)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
 test_time = Time_Def(0, t-0, step=0.1)
@@ -138,21 +139,16 @@ print(f"DE Model RMSE: {rmse_de}, Standard Deviation: {std_de}")
 error_data_gp = error_gp.to_report_data()
 error_data_de = error_de.to_report_data()
 
-# error_data_de:Data = {
-#     'time': test_data.time,
-# }
+loss_tracker = LossTracker(loss_file)
 
-# for i in range(system.dimension):
-#     error_data_gp[f'f{i+1}'] = error_gp[:,i]
-#     error_data_de[f'f{i+1}'] = error_de[:,i]
+# loss_tracker.add_loss(f'D = {train_time.count}', training_loss)
+fig_loss = loss_tracker.plot_losses()
+loss_tracker.to_csv()
+# fig_loss = plot_loss(training_loss)
 
-
-# plot_results(train_data, test_data, ref_data)
-
-
-fig_loss = plot_loss(training_loss)
 fig_error = plot_error(error_data_gp, error_data_de, ['x1', 'x2', 'u1'])
-fig_results = plot_states(train_data, test_data, ref_data, ['x1', 'x2', 'u1'])
+fig_results = plot_states([test_data, ref_data, train_data])
+
 plt.show()
 
 if SAVE:

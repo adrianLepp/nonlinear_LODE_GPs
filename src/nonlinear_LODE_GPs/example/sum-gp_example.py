@@ -13,7 +13,7 @@ import torch
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.lodegp import *
 from nonlinear_LODE_GPs.helpers import *
-from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight
+from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight, Epanechnikov_Weight
 from nonlinear_LODE_GPs.sum_gp import Local_GP_Sum
 
 torch.set_default_dtype(torch.float64)
@@ -26,15 +26,20 @@ system_name = "nonlinear_watertank"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
-optim_steps_single = 100
-optim_steps = 10
+optim_steps_single = 300
+optim_steps = 0
 
 equilibrium_controls = [
-    0.1, 
-    0.2, 
-    0.3, 
-    # 0.4, 
-    # 0.5,
+    0.1, # [2.0897e-02, 1.2742e-02, 1.0000e-05]
+    0.2, # [8.3588e-02, 5.0968e-02, 2.0000e-05]
+    0.3, # [1.8807e-01, 1.1468e-01, 3.0000e-05]
+    0.4, # [3.3435e-01, 2.0387e-01, 4.0000e-05]
+    0.5, # [5.2243e-01, 3.1855e-01, 5.0000e-05]
+    # 0.6, # [7.5229e-01, 4.5872e-01, 6.0000e-05]
+    # 0.7, # [1.0240e+00, 6.2436e-01, 7.0000e-05]
+    # 0.8,
+    # 0.9,
+    # 1#
 ]
 
 u_ctrl = 1
@@ -42,9 +47,9 @@ u_ctrl = 1
 x0 = torch.tensor([0.0, 0.0])
 
 t0 = 0.0
-t1 = 50.0
+t1 = 200.0
 
-downsample = 10
+downsample = 20
 sim_time = Time_Def(t0, t1, step=0.1)
 train_time = Time_Def(t0, t1, step=sim_time.step*downsample)
 test_time = Time_Def(t0, t1, step=0.1)
@@ -65,7 +70,7 @@ for i in range(len(equilibrium_controls)):
 #l = 44194
 w_func = Gaussian_Weight(centers[0])
 d = w_func.covar_dist(centers[-1], w_func.center, square_dist=True)
-l = d*torch.sqrt(torch.tensor(2))/8
+l = d*torch.sqrt(torch.tensor(2))/100
 
 # l = l*4
 
@@ -84,10 +89,10 @@ model = Local_GP_Sum(
     system_matrices, 
     equilibriums, 
     centers,
-    Gaussian_Weight, 
+    Epanechnikov_Weight, #KL_Divergence_Weight, #Gaussian_Weight, 
     weight_lengthscale=l)#, 
 model._optimize(optim_steps_single)
-# model.optimize(optim_steps, verbose=True)
+model.optimize(optim_steps, verbose=True)
 
 test_x = test_time.linspace()
 model.eval()
@@ -107,6 +112,19 @@ test_data = Data_Def(test_x.numpy(), estimate.detach().numpy(), system.state_dim
 
 plot_results(train_data, test_data)
 plot_weights(test_x, weights, title="Weighting Function")
+
+
+equilibriums = [torch.stack(equilibriums)[:,0], torch.stack(equilibriums)[:,1]]
+
+plt.figure()
+plt.plot(test_data.y[:,0],test_data.y[:,1], label='GP')
+plt.plot(equilibriums[0],equilibriums[1], 'x', label='Equilibrium')
+plt.xlabel('Angle [rad]')
+plt.ylabel('Angular Velocity [rad/s]')
+plt.legend()
+plt.grid(True)
+
+plt.show()
 
 
 if local_predictions:

@@ -68,6 +68,9 @@ class Local_GP_Sum(gpytorch.models.ExactGP):
     def optimize(self, training_iterations=100, verbose=False):
         self.train()
         self.likelihood.train()
+        for model in self.models:
+            model.eval()
+            model.likelihood.eval()
 
         # Use the adam optimizer
         # bias_params = [p for name, p in self.named_parameters() if 'bias' in name]
@@ -98,14 +101,20 @@ class Local_GP_Sum(gpytorch.models.ExactGP):
         for i in range(training_iterations):
             
             optimizer.zero_grad()
-            output = self(self.train_inputs[0])
-            loss = -mll(output, self.train_targets)
-            loss.backward()
+            mean, cov, weights = self.predict(self.train_inputs[0])
+            # output = gpytorch.distributions.MultitaskMultivariateNormal(mean, cov + torch.eye(cov.shape[0])* 1e-8)
+            # loss = -mll(output, self.train_targets)
+            weight_loss = torch.square(sum(weights) - 1)
+            total_loss = - torch.sum(weight_loss/ weight_loss.shape[0]) # + loss
+            total_loss.backward()
+
+            # weight_loss =  sum(weights) - 1 
+            # loss.backward()
             if verbose is True:
-                print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
+                print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, total_loss.item()))
             optimizer.step()
 
-            training_loss.append(loss.item())
+            training_loss.append(total_loss.item())
             # for i in range(len(self.w_fcts)-1):
             #     print(f'Grad {self.w_fcts[i].raw_length.grad.view(-1).item()}')
 
