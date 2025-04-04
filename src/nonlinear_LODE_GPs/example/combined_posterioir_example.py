@@ -14,7 +14,7 @@ import torch
 from nonlinear_LODE_GPs.lodegp import *
 from nonlinear_LODE_GPs.helpers import *
 from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight, Epanechnikov_Weight
-from nonlinear_LODE_GPs.sum_gp import Local_GP_Sum
+from nonlinear_LODE_GPs.combined_posterior import CombinedPosterior_ELODEGP
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
@@ -81,7 +81,7 @@ _train_x, _train_y= simulate_system(system, x0, sim_time, u)
 train_x, train_y = downsample_data(_train_x, _train_y, downsample)
 
 likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
-model = Local_GP_Sum(
+model = CombinedPosterior_ELODEGP(
     train_x, 
     train_y, 
     likelihood, 

@@ -1,3 +1,3 @@
-from . import helpers, kernels, likelihoods, localgp, lodegp, masking, mean_modules, mpc, noise_models, sum_gp, weighting
+from . import helpers, kernels, likelihoods, combined_gp, lodegp, masking, mean_modules, mpc, noise_models, combined_posterior, weighting
 
-__all__ = ['helpers', 'kernels', 'likelihoods', 'localgp', 'lodegp', 'masking', 'mean_modules', 'mpc', 'noise_models', 'sum_gp', 'weighting']
+__all__ = ['helpers', 'kernels', 'likelihoods', 'combined_gp', 'lodegp', 'masking', 'mean_modules', 'mpc', 'noise_models', 'combined_posterior', 'weighting']

@@ -25,7 +25,7 @@ def plot_weights(x, weights, title="Weighting Function"):
     plt.show()
 
 
-class Sum_LODEGP(gpytorch.models.ExactGP):
+class Combined_ELODEGP(gpytorch.models.ExactGP):
     def __init__(
             self, 
             train_x:torch.Tensor, 
@@ -43,7 +43,7 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
         ):
         if output_distance is True and pre_model is None:
             raise ValueError("Output distance is True but no pre_model is given.")
-        super(Sum_LODEGP, self).__init__(train_x, train_y, likelihood)
+        super(Combined_ELODEGP, self).__init__(train_x, train_y, likelihood)
 
         self.num_tasks = num_tasks
         self.pre_model = pre_model
@@ -72,8 +72,8 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
             w_functions[i].initialize(raw_length=torch.tensor(weight_lengthscale, requires_grad=False))
             # w_functions[i].initialize(weight=torch.tensor(1/len(A_list), requires_grad=False))
 
-        self.mean_module = Global_Mean(means, w_functions, num_tasks,output_distance)
-        self.covar_module = Global_Kernel(kernels, w_functions, num_tasks,output_distance, additive_kernel)
+        self.mean_module = Combined_Mean(means, w_functions, num_tasks,output_distance)
+        self.covar_module = Combined_Kernel(kernels, w_functions, num_tasks,output_distance, additive_kernel)
 
     def forward(self, X):
         if not torch.equal(X, self.train_inputs[0]):
@@ -93,9 +93,9 @@ class Sum_LODEGP(gpytorch.models.ExactGP):
         #     plot_weights(X, mean_x[:,0], 'Global Mean')
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)
     
-class Global_Mean(Mean):
+class Combined_Mean(Mean):
     def __init__(self, local_means:List[Mean], weight_functions:List[Gaussian_Weight], num_tasks:int, output_distance:bool=False):
-        super(Global_Mean, self).__init__()
+        super(Combined_Mean, self).__init__()
         self.num_tasks = num_tasks
         self.local_means = ModuleList(local_means)
         self.weight_functions = ModuleList(weight_functions)
@@ -117,9 +117,9 @@ class Global_Mean(Mean):
             plot_weights(x, sum(weight_list), 'Sum of Weights')
 
         return mean
-class Global_Kernel(Kernel):
+class Combined_Kernel(Kernel):
     def __init__(self, local_kernels:List[Kernel], weight_functions:List[Gaussian_Weight], num_tasks, output_distance=False, additive_kernel=False):
-        super(Global_Kernel, self).__init__(active_dims=None)
+        super(Combined_Kernel, self).__init__(active_dims=None)
         self.num_tasks = num_tasks
         self.local_kernels = ModuleList(local_kernels)
         self.weight_functions = ModuleList(weight_functions)

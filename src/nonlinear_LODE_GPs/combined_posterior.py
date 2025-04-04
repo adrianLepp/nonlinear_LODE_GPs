@@ -7,7 +7,7 @@ from nonlinear_LODE_GPs.weighting import *
 from nonlinear_LODE_GPs.lodegp import *
 from nonlinear_LODE_GPs.gp import BatchIndependentMultitaskGPModel
 
-class Local_GP_Sum(gpytorch.models.ExactGP):
+class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
     def __init__(
             self, 
             train_x, 
@@ -20,7 +20,7 @@ class Local_GP_Sum(gpytorch.models.ExactGP):
             Weight_Model:Gaussian_Weight,
             weight_lengthscale=None
             ):
-        super(Local_GP_Sum, self).__init__(train_x, train_y, likelihood)
+        super(CombinedPosterior_ELODEGP, self).__init__(train_x, train_y, likelihood)
         # super(LODEGP, self).__init__(train_x, train_y, likelihood)
         
         # train_inputs = (train_x,)

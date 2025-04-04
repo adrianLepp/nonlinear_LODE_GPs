@@ -10,7 +10,7 @@ from helpers import *
 from likelihoods import *
 from masking import *
 from mpc import mpc_algorithm, create_setpoints
-from sum_gp import Local_GP_Sum
+from sum_gp import CombinedPosterior_ELODEGP
 from weighting import Gaussian_Weight
 
 torch.set_default_dtype(torch.float64)
@@ -134,7 +134,7 @@ with gpytorch.settings.observation_nan_policy('mask'):
 
 
     #model = Weighted_Sum_GP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
-    model = Local_GP_Sum(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
+    model = CombinedPosterior_ELODEGP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
     model.optimize(optim_steps)
 
 

@@ -16,7 +16,7 @@ from result_reporter.latex_exporter import plot_states
 from nonlinear_LODE_GPs.lodegp import optimize_gp
 from nonlinear_LODE_GPs.helpers import *
 from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight
-from nonlinear_LODE_GPs.localgp import Sum_LODEGP
+from nonlinear_LODE_GPs.combined_gp import Combined_ELODEGP
 from nonlinear_LODE_GPs.gp import MultitaskGPModel, BatchIndependentMultitaskGPModel
 
 torch.set_default_dtype(torch.float64)
@@ -29,15 +29,15 @@ optim_steps = 300
 u_0 = 0.2
 u_1 = 0.25
 u_2 = 0.3
-u_ctrl = 0.5
+u_ctrl = 1
 controls = [
     0.1,
     # 0.25,
     0.2,
     # 0.25, 
     0.3,
-    # 0.4,
-    # 0.5,
+    0.4,
+    0.5,
     ]
 t0 = 0.0
 t1 = 100.0
@@ -100,7 +100,7 @@ train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, 
 
 # plt.show()
 
-model = Sum_LODEGP(
+model = Combined_ELODEGP(
     train_x, 
     train_y, 
     likelihood, 
@@ -130,3 +130,4 @@ with torch.no_grad(): #gpytorch.settings.prior_mode(True)
 test_data = Data_Def(test_x.numpy(), output.numpy(), system.state_dimension, system.control_dimension)
 
 plot_results(train_data, test_data, equilibrium=equilibriums[-1])#,, equilibrium=equilibriums[4]
+plt.show()
