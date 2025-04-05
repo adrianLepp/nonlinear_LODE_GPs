@@ -21,28 +21,34 @@ class Equilibrium_Mean(MultitaskMean):
 
         super().__init__(mean_modules, num_tasks)
 
-class LODE_Mean(Mean):
-    """
+
+class Controller_Mean(Mean):
+    def __init__(self, sub_mean:Mean, a:torch.Tensor, v:torch.Tensor):
+        super().__init__()
+        self.a = a
+        self.v = v
+        self.sub_mean = sub_mean
+
+    def control_law(self, x:torch.Tensor, y_ref=0):
+        return - x @ self.a # + self.v * y_ref
     
-    """
-
-    def __init__(self, multivariate_mean, V):
-        """
-        Args:
-        
-        """
-        super(LODE_Mean, self).__init__()
-
-        self.multivariate_mean = multivariate_mean
-        self.V = V
-
-    def forward(self, input):
-        """
-        
-        """
-        return self.V @ self.multivariate_mean(input)
-    
+    def forward(self, x):
+        b = self.sub_mean(x)
+        u = self.control_law(x).squeeze(1)
+        mean = b * u
+        return mean
 
 
+class FeedbackControl_Mean(MultitaskMean):
+    def __init__(self, b, a:torch.Tensor, v:torch.Tensor):
+        mean_beta = gpytorch.means.ConstantMean()
+        # mean_beta.initialize(constant=torch.tensor(b, requires_grad=False))
+        # mean_beta.raw_constant.requires_grad = False
+        mean_modules = [
+            gpytorch.means.ZeroMean(),
+            mean_beta,
+            Controller_Mean(mean_beta, a, v)
+        ]
 
+        super().__init__(mean_modules, 3)
     

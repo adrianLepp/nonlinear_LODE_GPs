@@ -33,6 +33,76 @@ torch_operations = {'mul': torch.mul, 'add': torch.add,
 DEBUG =False
 
 
+class FeedbackControl_Kernel(Kernel):
+    def __init__(
+            self,
+            a:torch.Tensor,
+            v:torch.Tensor,
+            active_dims=None
+        ):
+        super().__init__(active_dims=active_dims)
+        self.num_tasks = 3
+        
+        task_range = range(3)
+
+        K = [[None for j in task_range] for i in task_range]
+
+        self.cov_alpha = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2))
+        self.cov_beta = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=2))
+        self.cov_controller = Controller_Kernel(self.cov_beta, a, v)
+
+        K[0][0] = self.cov_alpha
+        K[0][1] = Zero_Kernel()
+        K[0][2] = self.cov_alpha
+        K[1][0] = Zero_Kernel()
+        K[1][1] = self.cov_beta         
+        K[1][2] = self.cov_controller                                       #5
+        K[2][0] = self.cov_alpha        
+        K[2][1] = self.cov_controller                                       #7
+        K[2][2] = self.cov_alpha + self.cov_controller #+ Noise_Kernel(1e-8) #8
+
+        self.K = K
+
+    def forward(self, x1, x2, diag=False, last_dim_is_batch=False, **params):
+        if last_dim_is_batch:
+            raise RuntimeError("MultitaskKernel does not accept the last_dim_is_batch argument.")
+        
+        K_list = list() 
+        for row in self.K:
+            for kernel in row:
+                K_list.append(kernel(x1, x2, diag=False, last_dim_is_batch=False, **params).to_dense())
+        K = einops.rearrange(K_list, '(t1 t2) h w -> (h t1) (w t2)', t1=self.num_tasks, t2=self.num_tasks)
+        return K
+    
+    def num_outputs_per_input(self, x1, x2):
+        return self.num_tasks
+    
+class Controller_Kernel(Kernel):
+    def __init__(self, sub_kernel:Kernel, a:torch.Tensor, v:torch.Tensor):
+        super().__init__(active_dims=None)
+        self.a = a
+        self.v = v
+        self.sub_kernel = sub_kernel
+
+    def control_law(self, x:torch.Tensor, y_ref=0):
+        return - x @ self.a # + self.v * y_ref
+
+    def forward(self, x1:torch.Tensor, x2:torch.Tensor, **params):
+        k = self.sub_kernel(x1, x2, **params)
+        u_1 = torch.diag(self.control_law(x1).squeeze(1))
+        u_2 = torch.diag(self.control_law(x2).squeeze(1))
+        if torch.equal(x1, x2):
+            ret = u_1 * k * u_2.t()
+            return ret
+        else:
+            ret = u_1 @ k @ u_2
+            _u_1 = self.control_law(x1)
+            _u_2 = self.control_law(x2)
+            _ret = _u_1.t() * k * _u_2
+        return ret
+        
+        
+
 class _Diagonal_Canonical_Kernel(Kernel):
     def __init__(
             self, 
@@ -273,7 +343,24 @@ class Zero_Kernel(Kernel):
 
     def num_outputs_per_input(self, x1, x2):
         return 1
+    
+class Noise_Kernel(Kernel):
+    def __init__(self, noise_variance=1.0, active_dims=None):
+        super(Noise_Kernel, self).__init__(active_dims=active_dims)
+        self.noise_variance = noise_variance
 
+    def forward(self, x1, x2, diag=False, **params):
+        x1_eq_x2 = torch.equal(x1, x2)
+        if x1_eq_x2:
+            if diag:
+                return self.noise_variance * torch.ones(x1.size(0))
+            else:
+                return self.noise_variance * torch.eye(x1.size(0))
+        else:
+            if diag:
+                return torch.zeros(x1.size(0))
+            else:
+                return torch.zeros(x1.size(0), x2.size(0))
 class LODE_Kernel(Kernel):
     def __init__(self, A, common_terms, active_dims=None, verbose=False):
         super(LODE_Kernel, self).__init__(active_dims=active_dims)
@@ -534,57 +621,3 @@ def translate_kernel_matrix_to_gpytorch_kernel(kernelmatrix, paramdict, common_t
 
 
     return kernel_call_matrix
-
-
-
-class Feedback_Control_Kernel(Kernel):
-    def __init__(
-            self, 
-            cov_alpha:Kernel, 
-            cov_beta:Kernel,
-            u_train:torch.Tensor,
-            active_dims=None
-        ):
-        super(Feedback_Control_Kernel, self).__init__(active_dims=active_dims)
-        self.num_tasks = 3
-        self.u_train = ConstantDiagLinearOperator(u_train.squeeze())
-        
-
-        task_range = range(self.num_tasks)
-
-        K = [[None for j in task_range] for i in task_range]
-
-        K[0][0] = cov_alpha
-        K[0][1] = Zero_Kernel()
-        K[0][2] = cov_alpha
-
-        K[1][1] = cov_beta
-        K[1][0] = Zero_Kernel()
-        K[1][2] = cov_beta * self.u_train #TODO
-
-        K[2][0] = cov_alpha
-        K[2][1] = cov_beta #TODO
-        K[2][2] = cov_alpha + cov_beta #TODO
-
-        self.K = K
-
-    def forward(self, x1, x2, diag=False, last_dim_is_batch=False, **params):
-        if last_dim_is_batch:
-            raise RuntimeError("MultitaskKernel does not accept the last_dim_is_batch argument.")
-        
-        K_list = list() 
-        for row in self.K:
-            for kernel in row:
-                K_list.append(kernel(x1, x2, diag=False, last_dim_is_batch=False, **params).to_dense())
-        # from https://discuss.pytorch.org/t/how-to-interleave-two-tensors-along-certain-dimension/11332/6
-        #if K_list[0].ndim == 1:
-        #    K_list = [kk.unsqueeze(1) for kk in K_list]
-        K = einops.rearrange(K_list, '(t1 t2) h w -> (h t1) (w t2)', t1=self.num_tasks, t2=self.num_tasks)
-        return K
-    
-    def num_outputs_per_input(self, x1, x2):
-        """
-        Given `n` data points `x1` and `m` datapoints `x2`, this multitask
-        kernel returns an `(n*num_tasks) x (m*num_tasks)` covariance matrix.
-        """
-        return self.num_tasks

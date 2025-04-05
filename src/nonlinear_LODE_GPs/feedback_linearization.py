@@ -80,7 +80,7 @@ def get_state_trajectories(system:ODE_System, sim_configs:List[Simulation_Config
         # data.append(Data_Def(t, x_u, system.state_dimension, system.control_dimension, y_names=['x1','x2','u']))
     return data
 
-def get_linearizing_feedback(gp:LODEGP, sim_configs:List[Simulation_Config], system_data:List[Data_Def], optim_steps:int):
+def get_linearizing_feedback(gp:LODEGP, sim_configs:List[Simulation_Config], system_data:List[Data_Def], optim_steps:int, model_config:dict):
     '''
     II: use the LODE-GP to learn a linearizing feedback controller trajectory for simulated state trajectories
     '''
@@ -93,7 +93,13 @@ def get_linearizing_feedback(gp:LODEGP, sim_configs:List[Simulation_Config], sys
         gp.set_train_data(train_x, train_y, strict=False)
 
         with gpytorch.settings.observation_nan_policy('mask'):
-            optimize_gp(gp, optim_steps)
+            if model_config['load']:
+                gp.load_state_dict(torch.load(model_config['model_path'], map_location=model_config['device']))
+            else:
+                optimize_gp(gp, optim_steps)
+
+            if model_config['save']:
+                torch.save(gp.state_dict(), model_config['model_path'])
             gp.eval()
             gp.likelihood.eval()
 
@@ -105,8 +111,8 @@ def get_linearizing_feedback(gp:LODEGP, sim_configs:List[Simulation_Config], sys
         lodegp_data.append(Data_Def(
             sim_config.time.linspace(), 
             output.mean, 
-            system_data[i].state_dim, 
-            system_data[i].control_dim, 
+            system_data[i].state_dim + 1, 
+            system_data[i].control_dim - 1, 
             uncertainty={
                 'variance': output.variance,
                 'lower': lower.numpy(),
@@ -147,12 +153,16 @@ def get_feedback_controller(
 
 
     # likelihood = gpytorch.likelihoods.GaussianLikelihood()
-    likelihood = gpytorch.likelihoods.FixedNoiseGaussianLikelihood(torch.cat(var, dim=0))
+    likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(
+        3, 
+        # noise_constraint=gpytorch.constraints.GreaterThan(torch.tensor(1e-15))
+    )
+    #likelihood = gpytorch.likelihoods.FixedNoiseGaussianLikelihood(torch.cat(var, dim=0))
 
-    # control_gp = Linearizing_Control_2(x, u, y_ref, likelihood) #consecutive_training=False
 
     control_gp = ControlGP_Class(x, u, y_ref, likelihood, variance=var, **controlGP_kwargs) #, b = 0.1, controller=controller
-    control_gp.optimize(optim_steps * 5, verbose=True)
+    with gpytorch.settings.observation_nan_policy('mask'):
+        control_gp.optimize(optim_steps * 3, verbose=True)
     
     return control_gp
 
@@ -204,9 +214,17 @@ def test_nonlinear_functions(control_gp, system:ODE_System, alpha, beta):
     ax[0,1].legend()
     return fig
 
-def learn_system_nonlinearities(system, sim_configs:List[Simulation_Config], optim_steps:int, ControlGP_Class, controlGP_kwargs:dict, plot=False, controller:Controller=None):
+def learn_system_nonlinearities(
+        system, 
+        sim_configs:List[Simulation_Config], 
+        optim_steps:int, 
+        ControlGP_Class, 
+        controlGP_kwargs:dict, 
+        plot=False, 
+        model_config=None
+    ):
     # I
-    system_data = get_state_trajectories(system, sim_configs, controller)
+    system_data = get_state_trajectories(system, sim_configs, controlGP_kwargs['controller'])
 
     # II
     likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(
@@ -214,19 +232,37 @@ def learn_system_nonlinearities(system, sim_configs:List[Simulation_Config], opt
         noise_constraint=gpytorch.constraints.GreaterThan(torch.tensor(1e-15))
     )
     lodegp = LODEGP(None, None, likelihood, system.dimension, system.get_ODEmatrix())
-    lodegp_data = get_linearizing_feedback(lodegp, sim_configs, system_data, optim_steps)
+    lodegp_data = get_linearizing_feedback(lodegp, sim_configs, system_data, optim_steps, model_config)
 
     # III
     control_gp = get_feedback_controller(sim_configs, system_data, lodegp_data, optim_steps, ControlGP_Class, controlGP_kwargs)
 
+    with gpytorch.settings.observation_nan_policy('mask'): 
+        with torch.no_grad():
+            control_gp.eval()
+            control_gp.likelihood.eval()
+            pred = control_gp(control_gp.train_inputs[0])
+
     alpha, beta = control_gp.get_nonlinear_fcts()
 
     if plot is True:
+        plt.figure()
+        plt.plot(pred.mean[:, 0], label = r'$\alpha$')
+        plt.plot(pred.mean[:, 1], label = r'$\beta$')
+        plt.plot(pred.mean[:, 2], label = r'$y$')
+        plt.plot(control_gp.train_targets[:,-1], label = r'$y train$')
+        plt.legend()
+        plt.show()
+
+        # for i, data in enumerate(system_data):
+        #     dy = np.gradient(data.y[:, 1].numpy(), data.time.numpy())
+        #     data.y = torch.cat((data.y, torch.tensor(dy).unsqueeze(1)), dim=1)
+        #     data.state_dim += 1
         data_names = [cfg.description for cfg in sim_configs]
         plot_states(
             system_data,
             data_names, 
-            header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
+            header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'], #'$\ddot{\phi}$', 
             title = f'Inverted Pendulum Training Data'
         )
         plot_states(
@@ -235,8 +271,10 @@ def learn_system_nonlinearities(system, sim_configs:List[Simulation_Config], opt
             header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
             title = f'Inverted Pendulum LODE GP.'
         )
-        figure = test_nonlinear_functions(control_gp, system, alpha, beta)
+        # plt.show()
 
-        plt.show()
+        # figure = test_nonlinear_functions(control_gp, system, alpha, beta)
+
+        
 
     return alpha, beta
