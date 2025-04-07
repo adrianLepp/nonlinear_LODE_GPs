@@ -16,6 +16,28 @@ from nonlinear_LODE_GPs.lodegp import optimize_gp
 from nonlinear_LODE_GPs.kernels import FeedbackControl_Kernel
 from nonlinear_LODE_GPs.mean_modules import FeedbackControl_Mean
 
+def exponential_Gaussian(gaussian: gpytorch.distributions.MultivariateNormal):
+    # return gaussian
+    mu = gaussian.mean
+    Sigma = gaussian.covariance_matrix
+    
+    
+    # exp_mu = torch.exp(mu + 0.5 * torch.diag(Sigma))  # shape: (d,)
+    # outer_exp_mu = exp_mu.unsqueeze(1) * exp_mu.unsqueeze(0)  # shape: (d, d)
+    # cov_Y = (torch.exp(Sigma) - 1) * outer_exp_mu  # shape: (d, d)
+    # return gpytorch.distributions.MultivariateNormal(exp_mu, cov_Y)
+
+    return gpytorch.distributions.MultivariateNormal(torch.exp(mu), gaussian._covar)
+
+def squared_gaussian(gaussian: gpytorch.distributions.MultivariateNormal):
+    # return gaussian
+    alpha = 1
+    mu = gaussian.mean
+    Sigma = gaussian._covar # covariance_matrix # _covar
+
+    mean = alpha + 1/2 * mu**2
+    covar = mu * Sigma.to_dense()  * mu
+    return gpytorch.distributions.MultivariateNormal(mean, covar + torch.eye(covar.shape[0]) * 1e-8)
 class GP(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood,
                   covar_module=None,
@@ -98,15 +120,17 @@ class Linearizing_Control_2(torch.nn.Module):
             train_x:List[torch.Tensor],
             train_u:List[torch.Tensor],
             train_y:List[torch.Tensor], # y_ref
-            likelihood,
             consecutive_training = True,
             **kwargs
         ):
         super().__init__()
 
-        # self.likelihood = likelihood
+        likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        #likelihood = gpytorch.likelihoods.FixedNoiseGaussianLikelihood(torch.cat(var, dim=0))
 
-        self.likelihood = MultiOutputLikelihood(likelihood)
+        self.likelihood = likelihood
+
+        # self.likelihood = MultiOutputLikelihood(likelihood)
 
         self.consecutive = consecutive_training
 
@@ -168,12 +192,16 @@ class Linearizing_Control_2(torch.nn.Module):
             optimizer.zero_grad()
 
             output_alpha = self._alpha(self.train_x)
-            output_beta = self._beta(self.train_x)
+            log_beta = self._beta(self.train_x)
+            output_beta = exponential_Gaussian(log_beta)
+            # output_beta = squared_gaussian(log_beta)
 
-            output = self.likelihood(output_alpha, output_beta, self.train_u)
 
-
-            # output = y_ref_from_alpha_beta(output_alpha, output_beta, self.train_u)    
+            # output = self.likelihood(output_alpha, output_beta, self.train_u)
+            # output = self.likelihood(output_alpha, log_beta, self.train_u)
+            
+            # output = self.likelihood(y_ref_from_alpha_beta(output_alpha, output_beta, self.train_u))#output_beta
+            output = y_ref_from_alpha_beta(output_alpha, output_beta, self.train_u)
 
             loss = -mll(output, self.train_y )
             loss.backward()
@@ -254,7 +282,11 @@ class Linearizing_Control_2(torch.nn.Module):
         return output.mean
     
     def forward(self, x:torch.Tensor, u:torch.Tensor):
-        return y_ref_from_alpha_beta(self._alpha(x), self._beta(x), u)
+        alpha = self._alpha(x)
+        log_beta = self._beta(x)
+        beta = exponential_Gaussian(log_beta)
+        # beta = squared_gaussian(log_beta)
+        return y_ref_from_alpha_beta(alpha, beta, u)
     
     def get_nonlinear_fcts(self):
         self._beta.eval()
@@ -266,7 +298,12 @@ class Linearizing_Control_2(torch.nn.Module):
             #       return control_gp.alpha(torch.tensor(x).unsqueeze(0)).mean.numpy()
 
         def beta(x,u):
-            return self._beta(torch.tensor(x).unsqueeze(0)).mean.clone().detach().numpy()
+            # log_beta = self._beta(torch.tensor(x).unsqueeze(0)).mean.clone().detach().numpy()
+            log_beta = self._beta(torch.tensor(x).unsqueeze(0))
+            beta = exponential_Gaussian(log_beta).mean.clone().detach().numpy()
+            # beta = squared_gaussian(log_beta).mean.clone().detach().numpy()
+
+            return beta
             # with torch.no_grad:
             # return control_gp.beta(torch.tensor(x).unsqueeze(0)).mean.numpy()
 
@@ -460,11 +497,18 @@ class MultiOutputLikelihood(gpytorch.likelihoods._GaussianLikelihoodBase):
     
 
 class Linearizing_Control_5(gpytorch.models.ExactGP):
-    def __init__(self, x:torch.Tensor, u:torch.Tensor, y_ref:torch.Tensor,  likelihood, b:float, a:torch.Tensor, v:torch.Tensor, variance, **kwargs):
+    def __init__(self, x:torch.Tensor, u:torch.Tensor, y_ref:torch.Tensor, b:float, a:torch.Tensor, v:torch.Tensor, variance, **kwargs):
         train_x = torch.cat(x, dim=0)
         train_u = torch.cat(u, dim=0)
         train_y = torch.cat(y_ref, dim=0) # TODOL output is dim 3: create two masked channels before
         train_y = torch.stack([torch.full_like(train_y, torch.nan), torch.full_like(train_y, torch.nan), train_y], dim=-1)
+
+        likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(3, )# noise_constraint=gpytorch.constraints.GreaterThan(torch.tensor(1e-15))
+        # task_noise = torch.full((3 * var[0].shape[0] * len(var),), float('nan'))
+        # task_noise[2::3] = torch.cat(var, dim=0).squeeze()
+        # task_noise = torch.cat(var, dim=0).squeeze().repeat_interleave(3)
+
+        # likelihood = FixedTaskNoiseMultitaskLikelihood(num_tasks=3, noise=torch.tensor([1e-8,1e-8]), rank=3, has_task_noise=True, task_noise=task_noise)
 
         super().__init__(train_x,  train_y, likelihood)
         
@@ -485,11 +529,17 @@ class Linearizing_Control_5(gpytorch.models.ExactGP):
         return optimize_gp(self, optim_steps, verbose)
     
     def get_nonlinear_fcts(self):
+        self.eval()
+        self.likelihood.eval()
         def alpha(x):
-            return self(torch.tensor(x).unsqueeze(0)).mean[:, 0].unsqueeze(-1)
+            if len(x.shape) == 1:
+                x = torch.tensor(x).unsqueeze(0)
+            return self(torch.tensor(x)).mean[:, 0].unsqueeze(-1)
 
         def beta(x, u):
-            return self(torch.tensor(x).unsqueeze(0)).mean[:, 1].unsqueeze(-1)
+            if len(x.shape) == 1:
+                x = torch.tensor(x).unsqueeze(0)
+            return self(torch.tensor(x)).mean[:, 1].unsqueeze(-1)
 
         return alpha, beta
     

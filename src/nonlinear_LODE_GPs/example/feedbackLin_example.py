@@ -30,7 +30,7 @@ model_path = f'{model_dir}/1{name}.pth'
 model_config = {
     'device': device,
     'model_path': model_path,
-    'load': True,
+    'load': False,
     'save': False,
 }
 
@@ -64,8 +64,23 @@ sim_configs = [
     Simulation_Config(sim_time, [np.pi/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
     Simulation_Config(sim_time, [-np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
     Simulation_Config(sim_time, [-np.pi/2 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+
+    # Simulation_Config(sim_time, [-np.pi/8 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [np.pi/8 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [-np.pi*5/8 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [np.pi*5/8 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+
+
+
     # Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [2*np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [0 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+
+    # Simulation_Config(sim_time, [np.pi*6/2  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [np.pi*12/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [-np.pi*12/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    # Simulation_Config(sim_time, [-np.pi*6/2 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+
     # Simulation_Config(sim_time, [3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
     # Simulation_Config(sim_time, [-3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
 ]
@@ -78,7 +93,7 @@ control_gp_kwargs = {
     'b' : 110,
     'a' : torch.tensor([[a0],[a1]], dtype=torch.float64),
     'v' : torch.tensor([v], dtype=torch.float64),
-    'controller':controller_0 
+    'controller':controller_0 # controller_0 # None  
 }
 
 alpha, beta = learn_system_nonlinearities(
@@ -104,7 +119,7 @@ test_controller = [
 ]
 
 
-sim_time_u = Time_Def(0, t*0.5, step=0.01)
+sim_time_u = Time_Def(0, t*1, step=0.01)
 
 x_0 = np.array([ np.pi/2, 0 ,0])
 
@@ -139,7 +154,7 @@ with gpytorch.settings.observation_nan_policy('mask'):
 fig_results = plot_states(
     control_data,
     data_names = ['Sim_gp', "sim", 'simple'], 
-    header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
+    header= [r'$\phi$', r'$\dot{\phi}$', r'$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
     title = f'Inverted Pendulum GP Control: a0: {a0}, a1: {a1}, v: {v}'
     )
 
