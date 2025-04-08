@@ -543,3 +543,80 @@ class Linearizing_Control_5(gpytorch.models.ExactGP):
 
         return alpha, beta
     
+class VariationalGP(gpytorch.models.ApproximateGP):
+    def __init__(self, inducing_points):
+        variational_distribution = gpytorch.variational.CholeskyVariationalDistribution(
+            inducing_points.size(0)
+        )
+        variational_strategy = gpytorch.variational.VariationalStrategy(
+            self, inducing_points, variational_distribution, learn_inducing_locations=True
+        )
+        super().__init__(variational_strategy)
+
+        self.mean_module = gpytorch.means.ZeroMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+
+    def forward(self, x):
+        mean = self.mean_module(x)
+        covar = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean, covar)
+    
+class CompositeModel(torch.nn.Module):
+    def __init__(self, train_x:torch.Tensor, train_u:torch.Tensor, train_y:torch.Tensor, **kwargs):
+        self.train_u = torch.cat(train_u, dim=0)
+        self.train_targets = torch.cat(train_y, dim=0)
+        self.train_inputs = [torch.cat(train_x, dim=0)]
+
+        inducing_length = math.floor(train_x[0].shape[0] / 2)
+        train_z = torch.cat([x[0:inducing_length] for x in train_x], dim=0)
+
+        super().__init__()
+
+        self._alpha = VariationalGP(train_z)
+        self._log_beta = VariationalGP(train_z)
+        self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
+
+    def forward(self, x, u):
+        alpha = self._alpha(x)
+        log_beta = self._log_beta(x)
+        beta = torch.exp(log_beta.mean)
+        mean = alpha.mean + beta * u
+        covar = alpha.covariance_matrix + u.unsqueeze(0)*log_beta.covariance_matrix * u.unsqueeze(1)
+        y_pred = gpytorch.distributions.MultivariateNormal(mean, covar)
+        return y_pred, alpha, beta
+    
+    def optimize(self, optim_steps:int, verbose:bool):
+        self._alpha.train()
+        self._log_beta.train()
+        self.likelihood.train()
+        
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
+        mll = gpytorch.mlls.VariationalELBO(self.likelihood, self._alpha, num_data=self.train_inputs[0].size(0))
+
+        train_loss = []
+
+        for i in range(optim_steps * 10):
+            optimizer.zero_grad()
+            y_pred , alpha, log_beta = self(self.train_inputs[0], self.train_u)
+            loss = -mll(y_pred, self.train_targets)
+            train_loss.append(loss)
+            loss.backward()
+            if i % 50 == 0 and verbose:
+                print(f"Iter {i}, Loss: {loss.item():.4f}")
+            optimizer.step()
+
+    def get_nonlinear_fcts(self):
+        self.eval()
+        self.likelihood.eval()
+        def alpha(x):
+            if len(x.shape) == 1:
+                x = torch.tensor(x).unsqueeze(0)
+            return self._alpha(torch.tensor(x)).mean
+
+        def beta(x, u):
+            if len(x.shape) == 1:
+                x = torch.tensor(x).unsqueeze(0)
+            log_beta = self._log_beta(torch.tensor(x))
+            return torch.exp(log_beta.mean)
+        
+        return alpha, beta

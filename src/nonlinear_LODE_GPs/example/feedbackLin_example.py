@@ -9,7 +9,7 @@ import gpytorch
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.helpers import get_config, load_system, Data_Def, Time_Def
 from nonlinear_LODE_GPs.feedback_linearization import Simulation_Config, learn_system_nonlinearities, Controller
-from nonlinear_LODE_GPs.gp import Linearizing_Control_2, Linearizing_Control_4, Linearizing_Control_5
+from nonlinear_LODE_GPs.gp import Linearizing_Control_2, Linearizing_Control_4, Linearizing_Control_5, CompositeModel
 from scipy.integrate import solve_ivp
 
 torch.set_default_dtype(torch.float64)
@@ -30,7 +30,7 @@ model_path = f'{model_dir}/1{name}.pth'
 model_config = {
     'device': device,
     'model_path': model_path,
-    'load': False,
+    'load': True,
     'save': False,
 }
 
@@ -100,7 +100,7 @@ alpha, beta = learn_system_nonlinearities(
     system, 
     sim_configs, 
     optim_steps, 
-    ControlGP_Class = Linearizing_Control_5,
+    ControlGP_Class = CompositeModel,
     controlGP_kwargs = control_gp_kwargs,
     plot=True, 
     model_config=model_config,
