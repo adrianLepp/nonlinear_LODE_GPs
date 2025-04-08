@@ -36,8 +36,9 @@ def squared_gaussian(gaussian: gpytorch.distributions.MultivariateNormal):
     Sigma = gaussian._covar # covariance_matrix # _covar
 
     mean = alpha + 1/2 * mu**2
-    covar = mu * Sigma.to_dense()  * mu
-    return gpytorch.distributions.MultivariateNormal(mean, covar + torch.eye(covar.shape[0]) * 1e-8)
+    #covar = mu * Sigma.to_dense()  * mu
+    covar = torch.diag(mu) @ Sigma @  torch.diag(mu)
+    return gpytorch.distributions.MultivariateNormal(mean, covar) # + torch.eye(covar.shape[0]) * 1e-4
 class GP(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood,
                   covar_module=None,
@@ -569,19 +570,33 @@ class CompositeModel(torch.nn.Module):
 
         inducing_length = math.floor(train_x[0].shape[0] / 2)
         train_z = torch.cat([x[0:inducing_length] for x in train_x], dim=0)
+        #FIXME: How to choose inducing points from state space?
+        # Choose inducing points by sampling uniformly from the input space
+        # Assuming the input space is bounded, define the bounds
+        x_min, x_max = train_x[0][:, 0].min(), train_x[0][:, 0].max()
+        y_min, y_max = train_x[0][:, 1].min(), train_x[0][:, 1].max()
+
+        # Generate a grid of inducing points within the bounds
+        l = 5
+        inducing_points_x, inducing_points_y = torch.meshgrid(
+            torch.linspace(x_min, x_max, l),
+            torch.linspace(y_min, y_max, l)
+        )
+        inducing_points = torch.stack([inducing_points_x.flatten(), inducing_points_y.flatten()], dim=-1)
 
         super().__init__()
 
-        self._alpha = VariationalGP(train_z)
-        self._log_beta = VariationalGP(train_z)
+        self._alpha = VariationalGP(inducing_points)
+        self._log_beta = VariationalGP(inducing_points)
         self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
 
     def forward(self, x, u):
         alpha = self._alpha(x)
         log_beta = self._log_beta(x)
-        beta = torch.exp(log_beta.mean)
-        mean = alpha.mean + beta * u
-        covar = alpha.covariance_matrix + u.unsqueeze(0)*log_beta.covariance_matrix * u.unsqueeze(1)
+        beta = squared_gaussian(log_beta)
+        
+        mean = alpha.mean + beta.mean * u
+        covar = alpha.covariance_matrix + u.unsqueeze(0)*beta.covariance_matrix * u.unsqueeze(1)
         y_pred = gpytorch.distributions.MultivariateNormal(mean, covar)
         return y_pred, alpha, beta
     
@@ -591,7 +606,7 @@ class CompositeModel(torch.nn.Module):
         self.likelihood.train()
         
         optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
-        mll = gpytorch.mlls.VariationalELBO(self.likelihood, self._alpha, num_data=self.train_inputs[0].size(0))
+        mll = gpytorch.mlls.VariationalELBO(self.likelihood, self._log_beta, num_data=self.train_inputs[0].size(0))
 
         train_loss = []
 
@@ -617,6 +632,8 @@ class CompositeModel(torch.nn.Module):
             if len(x.shape) == 1:
                 x = torch.tensor(x).unsqueeze(0)
             log_beta = self._log_beta(torch.tensor(x))
-            return torch.exp(log_beta.mean)
+            _beta = squared_gaussian(log_beta)
+            return _beta.mean
+            # return torch.exp(log_beta.mean)
         
         return alpha, beta

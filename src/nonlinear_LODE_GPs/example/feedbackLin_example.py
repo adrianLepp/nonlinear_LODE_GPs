@@ -30,7 +30,7 @@ model_path = f'{model_dir}/1{name}.pth'
 model_config = {
     'device': device,
     'model_path': model_path,
-    'load': True,
+    'load': False,
     'save': False,
 }
 

@@ -231,7 +231,7 @@ def learn_system_nonlinearities(
     alpha, beta = control_gp.get_nonlinear_fcts()
 
     if plot is True:
-        # '''
+        '''
         data_names = [cfg.description for cfg in sim_configs]
         plot_states(
             system_data,
@@ -245,7 +245,7 @@ def learn_system_nonlinearities(
             header= ['$\phi$', '$\dot{\phi}$', '$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
             title = f'Inverted Pendulum LODE GP.'
         )
-        # '''
+        '''
 
         figure = test_nonlinear_functions(control_gp, system, alpha, beta)
         plt.show()
