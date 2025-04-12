@@ -89,9 +89,9 @@ model = CombinedPosterior_ELODEGP(
     system_matrices, 
     equilibriums, 
     centers,
-    Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight
+    KL_Divergence_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight
     weight_lengthscale=l,
-    shared_weightscale=True,
+    shared_weightscale=False,
     additive_se=False,
     clustering=True,
     )#, 

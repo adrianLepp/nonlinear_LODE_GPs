@@ -101,73 +101,93 @@ class Constant_Weight(gpytorch.Module):#gpytorch.Module
         return torch.ones((x.shape[0],1)) * self.weight
     
 class KL_Divergence_Weight(gpytorch.Module):
-    def __init__(self, center:torch.Tensor, alpha_prior=None, alpha_constraint=None,):
+    def __init__(self, center:torch.Tensor, scale_prior=None, scale_constraint=None, shared_weightscale=False):
         super(KL_Divergence_Weight, self).__init__()
-        self.ignore_control = True #FIXME
+        self.ignore_control = False #FIXME
         self.center = center
-        # self.alpha = 0.001 #TODO This should be learned. 0.5 for localgp
+        self.num_tasks = 3 #FIXME
+        # self.scale = 0.001 #TODO This should be learned. 0.5 for localgp
+
+        self.shared_weightscale = shared_weightscale
+        if not shared_weightscale:
 
 
-        self.register_parameter(
-            name='raw_alpha', parameter=torch.nn.Parameter(torch.ones(1, 1, requires_grad=False))
-        )
-        
-        if alpha_constraint is not None:
-            self.register_constraint("raw_alpha", alpha_constraint)
-        
-        if alpha_prior is not None:
-            self.register_prior(
-                "alpha_prior",
-                alpha_prior,
-                lambda m: m.alpha,
-                lambda m, v : m._set_alpha(v),
+            self.register_parameter(
+                name='raw_scale', parameter=torch.nn.Parameter(torch.ones(1, 1))
             )
+            
+            if scale_constraint is not None:
+                self.register_constraint("raw_scale", scale_constraint)
+            
+            if scale_prior is not None:
+                self.register_prior(
+                    "scale_prior",
+                    scale_prior,
+                    lambda m: m.scale,
+                    lambda m, v : m._set_scale(v),
+                )
 
     @property
-    def alpha(self):
-        if hasattr(self, "raw_alpha_constraint"):
-            return self.raw_alpha_constraint.transform(self.raw_alpha)
-        return self.raw_alpha
+    def scale(self):
+        if hasattr(self, "raw_scale_constraint"):
+            return self.raw_scale_constraint.transform(self.raw_scale)
+        return self.raw_scale
 
-    @alpha.setter
-    def alpha(self, value):
-        return self._set_alpha(value)
+    @scale.setter
+    def scale(self, value):
+        return self._set_scale(value)
 
-    def _set_alpha(self, value):
+    def _set_scale(self, value):
         if not torch.is_tensor(value):
-            value = torch.as_tensor(value).to(self.raw_alpha)
+            value = torch.as_tensor(value).to(self.raw_scale)
         # when setting the paramater, transform the actual value to a raw one by applying the inverse transform
-        if hasattr(self, "raw_alpha_constraint"):
-            self.initialize(raw_alpha=self.raw_alpha_constraint.inverse_transform(value))
+        if hasattr(self, "raw_scale_constraint"):
+            self.initialize(raw_scale=self.raw_scale_constraint.inverse_transform(value))
         else:
-            self.initialize(raw_alpha=value)
+            self.initialize(raw_scale=value)
 
-    def forward_without_control(self, dist:gpytorch.distributions.Distribution):
+    def forward_without_control(self, dist:gpytorch.distributions.Distribution, scale):
         center = self.center[:,:-1] 
         N = dist.mean.shape[0]
         num_tasks = 3
-        reduced_covar = dist.covariance_matrix.reshape(N,num_tasks,N,num_tasks)[:,:-1,:,:-1].reshape(N*(num_tasks-1),N*(num_tasks-1)) + torch.eye(N*(num_tasks-1))*1e-6
+        reduced_covar = dist.covariance_matrix.reshape(N,num_tasks,N,num_tasks)[:,:-1,:,:-1].reshape(N*(num_tasks-1),N*(num_tasks-1)) + torch.eye(N*(num_tasks-1))*1e-6 #FIXME
         reduced_mean = dist.mean[:,:-1]
         reduced_dist = gpytorch.distributions.MultitaskMultivariateNormal(reduced_mean, reduced_covar)
         center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center.tile(N,1), reduced_covar)
         divergence = torch.tensor([torch.distributions.kl_divergence(reduced_dist[i,:], center_dist[i,:]) for i in range(N)])
-        weight = 1 / (self.alpha.squeeze()* divergence + 1).unsqueeze(1)
+        weight = 1 / (scale.squeeze()* divergence + 1).unsqueeze(1)
         return weight
 
-    def forward(self, dist:gpytorch.distributions.Distribution):
+    def forward(self, dist:gpytorch.distributions.Distribution, scale=None):
         if not isinstance(dist, gpytorch.distributions.Distribution):
             raise ValueError('Input must be a gpytorch distribution')
         
+        if not self.shared_weightscale:
+            scale = self.scale
+        
         if self.ignore_control:
-            return self.forward_without_control(dist)
+            return self.forward_without_control(dist, scale)
         
         center = self.center
         N = dist.mean.shape[0]
+        new_dist = gpytorch.distributions.MultitaskMultivariateNormal(dist.mean, torch.diag(torch.abs(torch.diag(dist.covariance_matrix)))) 
+        # center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center.tile(N,1), dist.covariance_matrix)
+        center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center, torch.diag(torch.tensor([1e-1,1e-1,1e-4])))
+        divergence = torch.tensor([torch.distributions.kl_divergence(new_dist[i,:], center_dist) for i in range(N)])
 
-        center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center.tile(N,1), dist.covariance_matrix)
-        divergence = torch.tensor([torch.distributions.kl_divergence(dist[i,:], center_dist[i,:]) for i in range(N)])
+        # import matplotlib.pyplot as plt
+
+        
+        # plt.figure(figsize=(10, 5))
+        # plt.plot(center_dist.mean.detach().numpy(), label="center_dist")
+        # plt.plot(dist.mean[0, :].detach().numpy(), label="dist[0,:]")
+        
+        # plt.plot(dist.mean[-1, :].detach().numpy(), label="dist[-1,:]")
+        # plt.legend()
+        # plt.show()
     
-        weight = 1 / (self.alpha.squeeze()* divergence + 1).unsqueeze(1)
+        weight = 1 / (scale.squeeze()* divergence + 1).unsqueeze(1)
+        # weight = 1 / ( divergence + 1).unsqueeze(1)
         return weight
     
 

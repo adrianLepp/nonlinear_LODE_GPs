@@ -42,10 +42,10 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
 
 
             if weight_lengthscale is not None:
-                self.scale = torch.tensor(weight_lengthscale, requires_grad=False)
+                self.scale = torch.tensor(weight_lengthscale, requires_grad=True)
                 # self.raw_scale.requires_grad = False
         else: 
-            self.scale = None
+            self.register_parameter( name='raw_scale', parameter=torch.nn.Parameter(None))
 
         self.train_data_subsets = []
 
@@ -107,10 +107,11 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             cov = cov.add_jitter()
             cov = cov + torch.eye(cov.size(-1)) * 1e-4
             (cov + cov.transpose(-1, -2)) / 2
-            output =  gpytorch.distributions.MultitaskMultivariateNormal(mean, cov)
+            # output =  gpytorch.distributions.MultitaskMultivariateNormal(mean, cov)
             # output = gpytorch.distributions.MultitaskMultivariateNormal(mean, cov + torch.eye(cov.shape[0])* 1e-8) # + torch.eye(cov.shape[0])* 1e-8
-            loss = -mll(output, self.train_targets)
+            # loss = -mll(output, self.train_targets)
             # loss = ((mean - self.train_targets)**2).mean()
+            loss = torch.cdist(mean, self.train_targets, p=2).mean()
             
             weights = torch.stack(weight_list, dim=1)
             weight_sums = weights.sum(dim=1)
