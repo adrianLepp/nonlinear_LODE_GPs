@@ -3,78 +3,64 @@ import torch
 import gpytorch
 from gpytorch.kernels.kernel import sq_dist, dist
 
-class Gaussian_Weight(gpytorch.Module):#gpytorch.Module
-    #def __init__(self, center:torch.Tensor, lengthscale_prior:torch.Tensor):
-    def __init__(self, center:torch.Tensor, length_prior=None, length_constraint=None,):
+class Gaussian_Weight(gpytorch.Module):
+    def __init__(self, center:torch.Tensor, scale_prior=None, scale_constraint=None, shared_weightscale=False):
         super(Gaussian_Weight, self).__init__()
         self.center = center
-        #self.lengthscale = torch.nn.Parameter(torch.ones(1)*(44194))
-        self.lengthscale = length_prior
 
-
-        self.register_parameter(
-            #name='raw_length', parameter=torch.nn.Parameter(torch.zeros(*self.batch_shape, 1, 1))
-            name='raw_length', parameter=torch.nn.Parameter(torch.ones(1, 1, requires_grad=False))
-        )
-        
-        # set the parameter constraint to be positive, when nothing is specified
-        # if length_constraint is None:
-        #     length_constraint = gpytorch.constraints.Positive()
-
-        # register the constraint
-        if length_constraint is not None:
-            self.register_constraint("raw_length", length_constraint)
-        
-        # set the parameter prior, see
-        # https://docs.gpytorch.ai/en/latest/module.html#gpytorch.Module.register_prior
-        if length_prior is not None:
-            self.register_prior(
-                "length_prior",
-                length_prior,
-                lambda m: m.length,
-                lambda m, v : m._set_length(v),
+        self.shared_weightscale = shared_weightscale
+        if not shared_weightscale:
+            self.register_parameter(
+            #name='raw_scale', parameter=torch.nn.Parameter(torch.zeros(*self.batch_shape, 1, 1))
+            name='raw_scale', parameter=torch.nn.Parameter(torch.ones(1, 1))
             )
+        
+            if scale_constraint is None:
+                scale_constraint = gpytorch.constraints.Positive()
+
+            if scale_constraint is not None:
+                self.register_constraint("raw_scale", scale_constraint)
+            
+            if scale_prior is not None:
+                self.register_prior(
+                    "scale_prior",
+                    scale_prior,
+                    lambda m: m.scale,
+                    lambda m, v : m._set_scale(v),
+                )
 
     @property
-    def length(self):
-        if hasattr(self, "raw_length_constraint"):
-            return self.raw_length_constraint.transform(self.raw_length)
-        return self.raw_length
-        # when accessing the parameter, apply the constraint transform
-        return self.raw_length_constraint.transform(self.raw_length)
+    def scale(self):
+        if hasattr(self, "raw_scale_constraint"):
+            return self.raw_scale_constraint.transform(self.raw_scale)
+        return self.raw_scale
 
-    @length.setter
-    def length(self, value):
-        return self._set_length(value)
+    @scale.setter
+    def scale(self, value):
+        return self._set_scale(value)
 
-    def _set_length(self, value):
+    def _set_scale(self, value):
         if not torch.is_tensor(value):
-            value = torch.as_tensor(value).to(self.raw_length)
+            value = torch.as_tensor(value).to(self.raw_scale)
         # when setting the paramater, transform the actual value to a raw one by applying the inverse transform
-        if hasattr(self, "raw_length_constraint"):
-            self.initialize(raw_length=self.raw_length_constraint.inverse_transform(value))
+        if hasattr(self, "raw_scale_constraint"):
+            self.initialize(raw_scale=self.raw_scale_constraint.inverse_transform(value))
         else:
-            self.initialize(raw_length=value)
+            self.initialize(raw_scale=value)
 
-    def forward(self, x:gpytorch.distributions.Distribution):
+    def forward(self, x:gpytorch.distributions.Distribution, scale=None):
         center = self.center
+        if not self.shared_weightscale:
+            scale = self.scale
 
         if isinstance(x, gpytorch.distributions.Distribution):
             x = x.mean
         
-        # x_ = x.div(self.lengthscale)
-        # center_ = center.div(self.lengthscale)
         unitless_sq_dist = self.covar_dist(x, center, square_dist=True)
         # clone because inplace operations will mess with what's saved for backward
-        covar_mat = unitless_sq_dist.div_(-2.0*self.length).exp_()
+        covar_mat = unitless_sq_dist.div_(-2.0*scale).exp_()
         return covar_mat
     
-        # return RBFCovariance.apply(
-        #     input,
-        #     self.center,
-        #     self.lengthscale,
-        #     lambda input, center: self.covar_dist(input, center, square_dist=True, diag=False),
-        # )
     def covar_dist(
         self,
         x1: torch.Tensor,
@@ -82,8 +68,6 @@ class Gaussian_Weight(gpytorch.Module):#gpytorch.Module
         square_dist: bool = False,
         **params,
     ) -> torch.Tensor:
-        
-
         x1_eq_x2 = torch.equal(x1, x2)
         dist_func = sq_dist if square_dist else dist
         return dist_func(x1, x2, x1_eq_x2)
@@ -95,14 +79,12 @@ class Constant_Weight(gpytorch.Module):#gpytorch.Module
         self.register_parameter(
             name='raw_weight', parameter=torch.nn.Parameter(torch.ones(1, 1))
         )
-        
         self.register_constraint("raw_weight", gpytorch.constraints.Positive())
 
     @property
     def weight(self):
         return self.raw_weight_constraint.transform(self.raw_weight)
         
-
     @weight.setter
     def weight(self, value):
         return self._set_weight(value)
@@ -110,57 +92,55 @@ class Constant_Weight(gpytorch.Module):#gpytorch.Module
     def _set_weight(self, value):
         if not torch.is_tensor(value):
             value = torch.as_tensor(value).to(self.raw_weight)
-        # when setting the paramater, transform the actual value to a raw one by applying the inverse transform
-        
         self.initialize(raw_weight=self.raw_weight_constraint.inverse_transform(value))
         
 
-    def forward(self, x:gpytorch.distributions.Distribution):
+    def forward(self, x:gpytorch.distributions.Distribution, *args, **kwargs):
         if isinstance(x, gpytorch.distributions.Distribution):
             x = x.mean
         return torch.ones((x.shape[0],1)) * self.weight
     
 class KL_Divergence_Weight(gpytorch.Module):
-    def __init__(self, center:torch.Tensor, length_prior=None, length_constraint=None,):
+    def __init__(self, center:torch.Tensor, alpha_prior=None, alpha_constraint=None,):
         super(KL_Divergence_Weight, self).__init__()
         self.ignore_control = True #FIXME
         self.center = center
-        self.alpha = 0.001 #TODO This should be learned. 0.5 for localgp
+        # self.alpha = 0.001 #TODO This should be learned. 0.5 for localgp
 
 
         self.register_parameter(
-            name='raw_length', parameter=torch.nn.Parameter(torch.ones(1, 1, requires_grad=False))
+            name='raw_alpha', parameter=torch.nn.Parameter(torch.ones(1, 1, requires_grad=False))
         )
         
-        if length_constraint is not None:
-            self.register_constraint("raw_length", length_constraint)
+        if alpha_constraint is not None:
+            self.register_constraint("raw_alpha", alpha_constraint)
         
-        if length_prior is not None:
+        if alpha_prior is not None:
             self.register_prior(
-                "length_prior",
-                length_prior,
-                lambda m: m.length,
-                lambda m, v : m._set_length(v),
+                "alpha_prior",
+                alpha_prior,
+                lambda m: m.alpha,
+                lambda m, v : m._set_alpha(v),
             )
 
     @property
-    def length(self):
-        if hasattr(self, "raw_length_constraint"):
-            return self.raw_length_constraint.transform(self.raw_length)
-        return self.raw_length
+    def alpha(self):
+        if hasattr(self, "raw_alpha_constraint"):
+            return self.raw_alpha_constraint.transform(self.raw_alpha)
+        return self.raw_alpha
 
-    @length.setter
-    def length(self, value):
-        return self._set_length(value)
+    @alpha.setter
+    def alpha(self, value):
+        return self._set_alpha(value)
 
-    def _set_length(self, value):
+    def _set_alpha(self, value):
         if not torch.is_tensor(value):
-            value = torch.as_tensor(value).to(self.raw_length)
+            value = torch.as_tensor(value).to(self.raw_alpha)
         # when setting the paramater, transform the actual value to a raw one by applying the inverse transform
-        if hasattr(self, "raw_length_constraint"):
-            self.initialize(raw_length=self.raw_length_constraint.inverse_transform(value))
+        if hasattr(self, "raw_alpha_constraint"):
+            self.initialize(raw_alpha=self.raw_alpha_constraint.inverse_transform(value))
         else:
-            self.initialize(raw_length=value)
+            self.initialize(raw_alpha=value)
 
     def forward_without_control(self, dist:gpytorch.distributions.Distribution):
         center = self.center[:,:-1] 
@@ -171,7 +151,7 @@ class KL_Divergence_Weight(gpytorch.Module):
         reduced_dist = gpytorch.distributions.MultitaskMultivariateNormal(reduced_mean, reduced_covar)
         center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center.tile(N,1), reduced_covar)
         divergence = torch.tensor([torch.distributions.kl_divergence(reduced_dist[i,:], center_dist[i,:]) for i in range(N)])
-        weight = 1 / (self.alpha* divergence + 1).unsqueeze(1)
+        weight = 1 / (self.alpha.squeeze()* divergence + 1).unsqueeze(1)
         return weight
 
     def forward(self, dist:gpytorch.distributions.Distribution):
@@ -184,13 +164,10 @@ class KL_Divergence_Weight(gpytorch.Module):
         center = self.center
         N = dist.mean.shape[0]
 
-        # center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center, torch.eye(center.shape[1])/1000)
-        # divergence = torch.tensor([torch.distributions.kl_divergence(dist[i,:], center_dist) for i in range(N)])
-
         center_dist = gpytorch.distributions.MultitaskMultivariateNormal(center.tile(N,1), dist.covariance_matrix)
         divergence = torch.tensor([torch.distributions.kl_divergence(dist[i,:], center_dist[i,:]) for i in range(N)])
-        # weight = torch.exp(-divergence/self.length).transpose(0,1)
-        weight = 1 / (self.alpha* divergence + 1).unsqueeze(1)
+    
+        weight = 1 / (self.alpha.squeeze()* divergence + 1).unsqueeze(1)
         return weight
     
 
@@ -246,11 +223,11 @@ class Epanechnikov_Weight(gpytorch.Module):
             x = x.mean
         
         const = torch.tensor(0.03)
-        factor = torch.sqrt(const)
+        factor = torch.sqrt(self.length)
         unitless_sq_dist = self.covar_dist(x, center, square_dist=True)
-        mask = torch.where(unitless_sq_dist > const, torch.tensor(0.0, device=unitless_sq_dist.device), torch.tensor(1.0, device=unitless_sq_dist.device))
+        mask = torch.where(unitless_sq_dist > self.length, torch.tensor(0.0, device=unitless_sq_dist.device), torch.tensor(1.0, device=unitless_sq_dist.device))
 
-        epachnikov = 3 / (4 * factor) * (1-unitless_sq_dist.div(const))
+        epachnikov = 3 / (4 * factor) * (1-unitless_sq_dist.div(self.length))
         return epachnikov * mask
     
     def covar_dist(

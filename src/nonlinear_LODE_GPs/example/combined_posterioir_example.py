@@ -20,18 +20,18 @@ torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
 
-local_predictions = False
+local_predictions = True
 SAVE = False
 system_name = "nonlinear_watertank"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 optim_steps_single = 300
-optim_steps = 0
+optim_steps =0
 
 equilibrium_controls = [
     0.1, # [2.0897e-02, 1.2742e-02, 1.0000e-05]
-    0.2, # [8.3588e-02, 5.0968e-02, 2.0000e-05]
+    # 0.2, # [8.3588e-02, 5.0968e-02, 2.0000e-05]
     0.3, # [1.8807e-01, 1.1468e-01, 3.0000e-05]
     0.4, # [3.3435e-01, 2.0387e-01, 4.0000e-05]
     0.5, # [5.2243e-01, 3.1855e-01, 5.0000e-05]
@@ -49,7 +49,7 @@ x0 = torch.tensor([0.0, 0.0])
 t0 = 0.0
 t1 = 200.0
 
-downsample = 20
+downsample =50
 sim_time = Time_Def(t0, t1, step=0.1)
 train_time = Time_Def(t0, t1, step=sim_time.step*downsample)
 test_time = Time_Def(t0, t1, step=0.1)
@@ -69,8 +69,8 @@ for i in range(len(equilibrium_controls)):
 
 #l = 44194
 w_func = Gaussian_Weight(centers[0])
-d = w_func.covar_dist(centers[-1], w_func.center, square_dist=True)
-l = d*torch.sqrt(torch.tensor(2))/100
+d = w_func.covar_dist(centers[1], w_func.center, square_dist=True)
+l = d*torch.sqrt(torch.tensor(2))/4
 
 # l = l*4
 
@@ -89,8 +89,12 @@ model = CombinedPosterior_ELODEGP(
     system_matrices, 
     equilibriums, 
     centers,
-    Epanechnikov_Weight, #KL_Divergence_Weight, #Gaussian_Weight, 
-    weight_lengthscale=l)#, 
+    Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight
+    weight_lengthscale=l,
+    shared_weightscale=True,
+    additive_se=False,
+    clustering=True,
+    )#, 
 model._optimize(optim_steps_single)
 model.optimize(optim_steps, verbose=True)
 
@@ -105,10 +109,15 @@ likelihood.eval()
 #     estimate = output.mean
 with torch.no_grad():
     estimate, cov, weights = model.predict(test_x)
-
+    output = gpytorch.distributions.MultitaskMultivariateNormal(estimate, cov)
+    lower, upper = output.confidence_region()
 
 train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
-test_data = Data_Def(test_x.numpy(), estimate.detach().numpy(), system.state_dimension, system.control_dimension, test_time)
+test_data = Data_Def(test_x.numpy(), estimate.detach().numpy(), system.state_dimension, system.control_dimension, test_time, uncertainty={
+                'variance': output.variance,
+                'lower': lower.detach().numpy(),
+                'upper': upper.detach().numpy(),
+                }, )
 
 plot_results(train_data, test_data)
 plot_weights(test_x, weights, title="Weighting Function")
@@ -124,16 +133,19 @@ plt.ylabel('Angular Velocity [rad/s]')
 plt.legend()
 plt.grid(True)
 
-plt.show()
-
 
 if local_predictions:
     for i in range(len(model.models)):
         with torch.no_grad() and gpytorch.settings.debug(False):
             output = likelihood(model.models[i](test_x))
             estimate = output.mean
-        train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
-        test_data = Data_Def(test_x.numpy(), estimate.detach().numpy(), system.state_dimension, system.control_dimension, test_time)
+            lower, upper = output.confidence_region()
+        train_data = Data_Def(model.train_data_subsets[i][0].numpy(), model.train_data_subsets[i][1].numpy(), system.state_dimension, system.control_dimension,train_time)
+        test_data = Data_Def(test_x.numpy(), estimate.detach().numpy(), system.state_dimension, system.control_dimension, test_time, uncertainty={
+                'variance': output.variance,
+                'lower': lower.detach().numpy(),
+                'upper': upper.detach().numpy(),
+                }, )
 
         plot_results(train_data, test_data)
 
@@ -145,6 +157,7 @@ states = State_Description(
     min=None, max=None)
 # ----------------------------------------------------------------------------  
 
+plt.show()
 
 if SAVE:
     config['model_id'] = MODEL_ID

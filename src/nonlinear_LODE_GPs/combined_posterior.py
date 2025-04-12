@@ -1,4 +1,5 @@
 import gpytorch 
+from linear_operator.operators import DiagLinearOperator
 # from sage.all import *
 from nonlinear_LODE_GPs.kernels import *
 import torch
@@ -18,52 +19,72 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             equilibriums, 
             centers, 
             Weight_Model:Gaussian_Weight,
-            weight_lengthscale=None
+            weight_lengthscale=None,
+            shared_weightscale=False,
+            additive_se=False,
+            clustering=False,
             ):
         super(CombinedPosterior_ELODEGP, self).__init__(train_x, train_y, likelihood)
-        # super(LODEGP, self).__init__(train_x, train_y, likelihood)
-        
-        # train_inputs = (train_x,)
-        # self.train_inputs = tuple(tri.unsqueeze(-1) if tri.ndimension() == 1 else tri for tri in train_inputs)
+        # super(CombinedPosterior_ELODEGP, self).__init__()
+        # self.likelihood = likelihood
+        # self.train_inputs = (train_x, )
         # self.train_targets = train_y
-
         self.num_tasks = num_tasks
 
         models = []
         w_fcts = []
 
-        for i in range(len(system_matrices)):
-            mean_module = Equilibrium_Mean(equilibriums[i], num_tasks)
-            model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrices[i], mean_module)
+        self.shared_weightscale = shared_weightscale
+        if shared_weightscale:
+            self.register_parameter( name='raw_scale', parameter=torch.nn.Parameter(torch.ones(1, 1)))
+            scale_constraint = gpytorch.constraints.Positive()
+            self.register_constraint("raw_scale", scale_constraint)
 
-            w_fcts.append(Weight_Model(centers[i]))
+
+            if weight_lengthscale is not None:
+                self.scale = torch.tensor(weight_lengthscale, requires_grad=False)
+                # self.raw_scale.requires_grad = False
+        else: 
+            self.scale = None
+
+        self.train_data_subsets = []
+
+        if clustering:
+            distances = torch.cdist(train_y.unsqueeze(0), torch.stack(centers).unsqueeze(0)).squeeze(0)
+            cluster_assignments = torch.argmin(distances, dim=0)
+            for i in range(len(system_matrices)):
+                cluster_indices = (cluster_assignments == i).nonzero(as_tuple=True)[0]
+                self.train_data_subsets.append((train_x[cluster_indices], train_y[cluster_indices]))
+
+        for i in range(len(system_matrices)):
+            if clustering:
+                train_x_subset, train_y_subset = self.train_data_subsets[i]
+            else:
+                train_x_subset, train_y_subset = train_x, train_y
+            mean_module = Equilibrium_Mean(equilibriums[i], num_tasks)
+            model = LODEGP(train_x_subset, train_y_subset, likelihood, num_tasks, system_matrices[i], mean_module)
+
+            w_fcts.append(Weight_Model(centers[i], shared_weightscale=shared_weightscale))
             # w_fcts[i].initialize(length=torch.tensor(weight_lengthscale, requires_grad=True))#TODO
-            w_fcts[i].length = weight_lengthscale# TODO: add weight model specific paremeter beforehand to the model
+            
+            # w_fcts[i].length = weight_lengthscale# TODO: add weight model specific paremeter beforehand to the model
             models.append(model)
         
-        model = BatchIndependentMultitaskGPModel(train_x, train_y, likelihood, num_tasks)
-        models.append(model)
-        w_fct = Constant_Weight()
-        w_fct.initialize(weight=torch.tensor(0.5/len(system_matrices), requires_grad=True))
-        w_fcts.append(w_fct)
+        if additive_se:
+            model = BatchIndependentMultitaskGPModel(train_x, train_y, likelihood, num_tasks)
+            models.append(model)
+            w_fct = Constant_Weight()
+            w_fct.initialize(weight=torch.tensor(0.5/len(system_matrices), requires_grad=False))
+            # w_fct.weight.requires_grad = False
+            w_fct.raw_weight.requires_grad = False
+            w_fcts.append(w_fct)
 
         self.models = ModuleList(models)
         self.w_fcts = ModuleList(w_fcts)
-
-        # self.likelihood =likelihood# gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
     
     def _optimize(self, model, training_iterations=100, verbose=False):
         for model in self.models:
             optimize_gp(model, training_iterations=training_iterations, verbose=verbose)
-
-            # print("\n----------------------------------------------------------------------------------\n")
-            # print(f'Trained model parameters:')
-            # named_parameters = list(model.named_parameters())
-            # param_conversion = torch.nn.Softplus()
-
-            # for j in range(len(named_parameters)):
-            #     print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
-            # print("\n----------------------------------------------------------------------------------\n")
 
     def optimize(self, training_iterations=100, verbose=False):
         self.train()
@@ -72,51 +93,37 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             model.eval()
             model.likelihood.eval()
 
-        # Use the adam optimizer
-        # bias_params = [p for name, p in self.named_parameters() if 'bias' in name]
-        # optimizer = torch.optim.Adam(
-        #     [
-        #         {'params': self.models[0].parameters()},
-        #         {'params': self.w_fcts[0].parameters()},
-        #         {'params': self.models[1].parameters()},
-        #         {'params': self.w_fcts[1].parameters()},
-        #         {'params': self.models[2].parameters()},
-        #         {'params': self.w_fcts[2].parameters()}
-        #     ] ,
-        #     # params= (self.models[i].parameters(), self.w_fcts[i].parameters() for i in range(len(self.models))),
-        #     # self.parameters()
-        #     lr=0.1
-        # )
-
-        # optimizer = torch.optim.Adam([{'params':self.parameters()}, {'params':self.w_fcts[0].parameters()}], lr=0.1)
         optimizer = torch.optim.Adam(self.parameters(), lr=0.1)
 
-        # "Loss" for GPs - the marginal log likelihood
-        #mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
-        mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
+        # mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
+        mll = gpytorch.mlls.LeaveOneOutPseudoLikelihood(self.likelihood, self)
 
         training_loss = []
         
-        #print(list(self.named_parameters()))
         for i in range(training_iterations):
             
             optimizer.zero_grad()
-            mean, cov, weights = self.predict(self.train_inputs[0])
-            # output = gpytorch.distributions.MultitaskMultivariateNormal(mean, cov + torch.eye(cov.shape[0])* 1e-8)
-            # loss = -mll(output, self.train_targets)
-            weight_loss = torch.square(sum(weights) - 1)
-            total_loss = - torch.sum(weight_loss/ weight_loss.shape[0]) # + loss
+            mean, cov, weight_list = self.predict(self.train_inputs[0])
+            cov = cov.add_jitter()
+            cov = cov + torch.eye(cov.size(-1)) * 1e-4
+            (cov + cov.transpose(-1, -2)) / 2
+            output =  gpytorch.distributions.MultitaskMultivariateNormal(mean, cov)
+            # output = gpytorch.distributions.MultitaskMultivariateNormal(mean, cov + torch.eye(cov.shape[0])* 1e-8) # + torch.eye(cov.shape[0])* 1e-8
+            loss = -mll(output, self.train_targets)
+            # loss = ((mean - self.train_targets)**2).mean()
+            
+            weights = torch.stack(weight_list, dim=1)
+            weight_sums = weights.sum(dim=1)
+            weight_loss = ((weight_sums - 1) ** 2).mean()
+
+            total_loss = loss + weight_loss
             total_loss.backward()
 
-            # weight_loss =  sum(weights) - 1 
-            # loss.backward()
             if verbose is True:
-                print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, total_loss.item()))
+                print('Iter %d/%d - Loss: %.3f - weight-loss %.3f' % (i + 1, training_iterations, loss.item(), weight_loss.item()))
             optimizer.step()
 
             training_loss.append(total_loss.item())
-            # for i in range(len(self.w_fcts)-1):
-            #     print(f'Grad {self.w_fcts[i].raw_length.grad.view(-1).item()}')
 
         print("\n----------------------------------------------------------------------------------\n")
         print('Trained model parameters:')
@@ -133,27 +140,59 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             model.eval()
             model.likelihood.eval()
         self.likelihood.eval()
+        # self.eval()
 
     def train(self):
         for model in self.models:
             model.train()
             model.likelihood.train()
+        # self.train()
+        # self.likelihood.train()
 
     def set_train_data(self, x, y, **kwargs):
         [model.set_train_data(x, y, **kwargs) for model in self.models]
         
 
     def predict(self, x, noise:torch.Tensor=None):
-        # with torch.no_grad():
-        outputs = [self.models[l].likelihood(self.models[l](x), noise=noise) for l in range(len(self.models))]
-        #weights = [self.w_fcts[l](output.mean) for l, output in enumerate(outputs)]
-        weights = [self.w_fcts[l](output) for l, output in enumerate(outputs)] #TODO
-        # weights_extended = [torch.tile(weights[l],(self.num_tasks,1)) for l in range(len(weights))]
-        weights_extended = [weights[l].repeat_interleave(self.num_tasks) for l in range(len(weights))] 
-        mean = sum([outputs[l].mean * weights[l] for l in range(len(outputs))]) /sum(weights)
-        cov = sum([outputs[l].covariance_matrix * weights_extended[l] for l in range(len(outputs))])
+        outputs = [self.models[l](x) for l in range(len(self.models))]
+        
+        weights = [self.w_fcts[l](output, self.scale) for l, output in enumerate(outputs)]
+        weight_sum = sum(weights)
+        weights_normalized = [weights[l] / weight_sum for l in range(len(weights))]
+
+        weights_extended = [weights_normalized[l].repeat_interleave(self.num_tasks) for l in range(len(weights_normalized))] 
+        mean = sum([outputs[l].mean * weights_normalized[l] for l in range(len(outputs))]) 
+        mean_flat = mean.flatten().unsqueeze(1) @ mean.flatten().unsqueeze(0)
+        mean_difference = [outputs[l].mean.flatten() - mean.flatten() for l in range(len(outputs))]
+
+        # cov = sum([outputs[l].covariance_matrix @ torch.diag(weights_extended[l]) for l in range(len(outputs))]) #torch.diag(weights_extended[l]) @ 
+        
+        cov = sum([DiagLinearOperator(weights_extended[l]) @ (outputs[l]._covar + mean_difference[l].unsqueeze(1) @ mean_difference[l].unsqueeze(0) ) for l in range(len(outputs))])
+
+        # weights_extended = [weights[l].repeat_interleave(self.num_tasks) for l in range(len(weights))] 
+        # mean = sum([outputs[l].mean * weights[l] for l in range(len(outputs))]) /sum(weights)
+        # cov = sum([outputs[l].covariance_matrix @ torch.diag(weights_extended[l]) for l in range(len(outputs))]) #torch.diag(weights_extended[l]) @ 
         return mean, cov, weights
     
     def forward(self, x, noise:torch.Tensor=None):
         mean, cov, weights = self.predict(x, noise=noise)
         return gpytorch.distributions.MultitaskMultivariateNormal(mean, cov)
+
+    @property
+    def scale(self):
+        if hasattr(self, "raw_scale_constraint"):
+            return self.raw_scale_constraint.transform(self.raw_scale)
+        return self.raw_scale
+
+    @scale.setter
+    def scale(self, value):
+        return self._set_scale(value)
+
+    def _set_scale(self, value):
+        if not torch.is_tensor(value):
+            value = torch.as_tensor(value).to(self.raw_scale)
+        # when setting the paramater, transform the actual value to a raw one by applying the inverse transform
+        if hasattr(self, "raw_scale_constraint"):
+            self.initialize(raw_scale=self.raw_scale_constraint.inverse_transform(value))
+        else:
+            self.initialize(raw_scale=value)

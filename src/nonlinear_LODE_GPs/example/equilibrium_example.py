@@ -16,7 +16,7 @@ from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = True
+SAVE = False
 
 
 system_name = "nonlinear_watertank"
@@ -31,9 +31,9 @@ sim_time = Time_Def(0, t, step=0.1)
 train_time = Time_Def(0, t, step=sim_time.step*downsample)
 test_time = Time_Def(0, t-0, step=0.1)
 
-u_e_rel = 0.1
+u_e_rel = 0.3
 
-u_rel = 0.2
+u_rel = 1
 
 
 system = load_system(system_name)
@@ -143,7 +143,7 @@ loss_tracker = LossTracker(loss_file)
 
 # loss_tracker.add_loss(f'D = {train_time.count}', training_loss)
 fig_loss = loss_tracker.plot_losses()
-loss_tracker.to_csv()
+# loss_tracker.to_csv()
 # fig_loss = plot_loss(training_loss)
 
 fig_error = plot_error(error_data_gp, error_data_de, ['x1', 'x2', 'u1'])
