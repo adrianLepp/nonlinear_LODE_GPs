@@ -20,18 +20,18 @@ torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
 
-local_predictions = True
+local_predictions = False
 SAVE = False
 system_name = "nonlinear_watertank"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 optim_steps_single = 300
-optim_steps =0
+optim_steps =100
 
 equilibrium_controls = [
     0.1, # [2.0897e-02, 1.2742e-02, 1.0000e-05]
-    # 0.2, # [8.3588e-02, 5.0968e-02, 2.0000e-05]
+    0.2, # [8.3588e-02, 5.0968e-02, 2.0000e-05]
     0.3, # [1.8807e-01, 1.1468e-01, 3.0000e-05]
     0.4, # [3.3435e-01, 2.0387e-01, 4.0000e-05]
     0.5, # [5.2243e-01, 3.1855e-01, 5.0000e-05]
@@ -49,7 +49,7 @@ x0 = torch.tensor([0.0, 0.0])
 t0 = 0.0
 t1 = 200.0
 
-downsample =50
+downsample =20
 sim_time = Time_Def(t0, t1, step=0.1)
 train_time = Time_Def(t0, t1, step=sim_time.step*downsample)
 test_time = Time_Def(t0, t1, step=0.1)
@@ -89,11 +89,12 @@ model = CombinedPosterior_ELODEGP(
     system_matrices, 
     equilibriums, 
     centers,
-    KL_Divergence_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight
-    weight_lengthscale=l,
+    Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight
+    # weight_lengthscale=torch.tensor([100]),
     shared_weightscale=False,
-    additive_se=False,
+    # additive_se=True,
     clustering=True,
+    output_weights=False,
     )#, 
 model._optimize(optim_steps_single)
 model.optimize(optim_steps, verbose=True)

@@ -23,6 +23,7 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             shared_weightscale=False,
             additive_se=False,
             clustering=False,
+            output_weights=True,
             ):
         super(CombinedPosterior_ELODEGP, self).__init__(train_x, train_y, likelihood)
         # super(CombinedPosterior_ELODEGP, self).__init__()
@@ -35,6 +36,9 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
         w_fcts = []
 
         self.shared_weightscale = shared_weightscale
+        self.additive_se = additive_se
+        self.output_weights = output_weights
+
         if shared_weightscale:
             self.register_parameter( name='raw_scale', parameter=torch.nn.Parameter(torch.ones(1, 1)))
             scale_constraint = gpytorch.constraints.Positive()
@@ -42,7 +46,7 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
 
 
             if weight_lengthscale is not None:
-                self.scale = torch.tensor(weight_lengthscale, requires_grad=True)
+                self.scale = torch.tensor(weight_lengthscale)#, requires_grad=True
                 # self.raw_scale.requires_grad = False
         else: 
             self.register_parameter( name='raw_scale', parameter=torch.nn.Parameter(None))
@@ -55,6 +59,9 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             for i in range(len(system_matrices)):
                 cluster_indices = (cluster_assignments == i).nonzero(as_tuple=True)[0]
                 self.train_data_subsets.append((train_x[cluster_indices], train_y[cluster_indices]))
+                if not self.output_weights:
+                    centers[i] = train_x[cluster_indices[cluster_indices.shape[0]//2]].unsqueeze(0).unsqueeze(0)
+                
 
         for i in range(len(system_matrices)):
             if clustering:
@@ -93,7 +100,7 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             model.eval()
             model.likelihood.eval()
 
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.1)
+        optimizer = torch.optim.Adam(self.parameters(), lr=3)
 
         # mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
         mll = gpytorch.mlls.LeaveOneOutPseudoLikelihood(self.likelihood, self)
@@ -117,7 +124,7 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             weight_sums = weights.sum(dim=1)
             weight_loss = ((weight_sums - 1) ** 2).mean()
 
-            total_loss = loss + weight_loss
+            total_loss = weight_loss # + loss
             total_loss.backward()
 
             if verbose is True:
@@ -154,19 +161,25 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
         [model.set_train_data(x, y, **kwargs) for model in self.models]
         
 
-    def predict(self, x, noise:torch.Tensor=None):
+    def predict(self, _x, noise:torch.Tensor=None):
+        x = _x.squeeze() #TODO: is this ok?
         outputs = [self.models[l](x) for l in range(len(self.models))]
         
-        weights = [self.w_fcts[l](output, self.scale) for l, output in enumerate(outputs)]
+
+        if self.output_weights:
+            if self.additive_se:
+                weights = [self.w_fcts[l](outputs[-1], self.scale) for l, output in enumerate(outputs)]
+            else:
+                weights = [self.w_fcts[l](output, self.scale) for l, output in enumerate(outputs)]
+        else:
+            weights = [self.w_fcts[l](x.unsqueeze(1), self.scale) for l, output in enumerate(outputs)]
+
         weight_sum = sum(weights)
         weights_normalized = [weights[l] / weight_sum for l in range(len(weights))]
 
         weights_extended = [weights_normalized[l].repeat_interleave(self.num_tasks) for l in range(len(weights_normalized))] 
         mean = sum([outputs[l].mean * weights_normalized[l] for l in range(len(outputs))]) 
-        mean_flat = mean.flatten().unsqueeze(1) @ mean.flatten().unsqueeze(0)
         mean_difference = [outputs[l].mean.flatten() - mean.flatten() for l in range(len(outputs))]
-
-        # cov = sum([outputs[l].covariance_matrix @ torch.diag(weights_extended[l]) for l in range(len(outputs))]) #torch.diag(weights_extended[l]) @ 
         
         cov = sum([DiagLinearOperator(weights_extended[l]) @ (outputs[l]._covar + mean_difference[l].unsqueeze(1) @ mean_difference[l].unsqueeze(0) ) for l in range(len(outputs))])
 
