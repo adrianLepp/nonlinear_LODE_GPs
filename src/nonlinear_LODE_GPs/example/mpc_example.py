@@ -2,14 +2,16 @@
 # from sage.all import *
 # import sage
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
-from kernels import *
+from nonlinear_LODE_GPs.kernels import *
 import torch
 
 # ----------------------------------------------------------------------------
-from helpers import *
-from likelihoods import *
-from masking import *
-from mpc import mpc_algorithm, pretrain
+from nonlinear_LODE_GPs.helpers import *
+from nonlinear_LODE_GPs.likelihoods import *
+from nonlinear_LODE_GPs.masking import *
+from nonlinear_LODE_GPs.mpc import mpc_algorithm, pretrain, optimize_mpc_gp, create_setpoints
+from nonlinear_LODE_GPs.lodegp import LODEGP
+from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
@@ -70,7 +72,7 @@ u_1 = 0.2   # control input to find equilibrium where we start
 u_2 = 0.3 # control input to find equilibrium where we want to end and linearize around
 
 # TIME
-t = 200
+t = 2000
 
 control_time = Time_Def(
     0, 
@@ -80,16 +82,16 @@ control_time = Time_Def(
 
 sim_time = Time_Def(
     0, 
-    200, 
+    t, 
     step=0.1
 )
 
 # GP settings
 optim_steps = 0
-pretrain_steps = 200
+pretrain_steps = 00
 hyperparameters = {
-    # 'lengthscale_2': 3.6731,
-    #'signal_variance_2': 0.1, # negative
+    'lengthscale_2': 3.4,
+    'signal_variance_2': -4, # negative
 }
 
 
@@ -117,8 +119,27 @@ elif reference_strategie['soft_constraints'] == 'equilibrium':
 #x_min[2] = x_e[2]
 states = State_Description(x_e, x_0, min=x_min, max=x_max)
 
-model, mask = pretrain(system_matrix, num_tasks, control_time, pretrain_steps, reference_strategie, states, hyperparameters)# pretrain the system and generate gp model. eventually not necessary
-sim_data, ref_data, lode_data = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
+with gpytorch.settings.observation_nan_policy('mask'):
+
+
+    train_y, train_x, task_noise = create_setpoints(reference_strategie, control_time, states)
+    likelihood = FixedTaskNoiseMultitaskLikelihood(num_tasks=num_tasks, noise=torch.tensor([1e-8,1e-8]), rank=num_tasks, has_task_noise=True, task_noise=task_noise)
+
+
+    mean_module = Equilibrium_Mean(states.equilibrium, num_tasks)
+    model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module)
+
+    if hyperparameters is not None:
+        for key, value in hyperparameters.items():
+            if hasattr(model.covar_module.model_parameters, key):
+                setattr(model.covar_module.model_parameters, key, torch.nn.Parameter(torch.tensor(value), requires_grad=False))
+            else:
+                print(f'Hyperparameter {key} not found in model')
+
+    optimize_mpc_gp(model, train_x, training_iterations=pretrain_steps)
+
+    # model, mask = pretrain(system_matrix, num_tasks, control_time, pretrain_steps, reference_strategie, states, hyperparameters)# pretrain the system and generate gp model. eventually not necessary
+    sim_data, ref_data, lode_data = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
 
 
 # calc error
@@ -147,7 +168,7 @@ constraint_viol = constr_viol(
 )
 control_err = mse_mean(
     torch.tensor(sim_data.y[:,0:system.control_dimension]),
-    torch.tile(states.target[0:system.control_dimension].clone().detach(), (sim_time.count+1, 1))
+    torch.tile(states.target[0:system.control_dimension].clone().detach(), (sim_time.count, 1))
     #torch.zeros_like(torch.tensor(lode_data))
 )
 
@@ -159,6 +180,7 @@ print(f"Constraint violation: {constraint_viol}")
 
 
 plot_results(ref_data, lode_data, sim_data)
+plt.show()
 
 if SAVE:
     torch.save(model.state_dict(), model_path)

@@ -100,7 +100,7 @@ alpha, beta = learn_system_nonlinearities(
     system, 
     sim_configs, 
     optim_steps, 
-    ControlGP_Class = CompositeModel,
+    ControlGP_Class = Linearizing_Control_5,# CompositeModel
     controlGP_kwargs = control_gp_kwargs,
     plot=True, 
     model_config=model_config,

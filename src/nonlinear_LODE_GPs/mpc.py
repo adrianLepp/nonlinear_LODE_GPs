@@ -40,7 +40,7 @@ def inference_mpc_gp(model:LODEGP, test_x:torch.Tensor):
     
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         noise  = torch.ones(torch.Size((model.num_tasks,test_x.shape[0]))).flatten() * 1e-4
-        outputs = model(test_x, noise)
+        outputs = model(test_x) #, noise
         if isinstance(model.likelihood, MultitaskGaussianLikelihoodWithMissingObs):
             predictions = model.likelihood(outputs, train_data=model.train_inputs[0], current_data=test_x, mask=model.mask)
         else:
@@ -70,6 +70,19 @@ def optimize_mpc_gp(gp:LODEGP, train_x, training_iterations=100, verbose=True):
         if verbose is True:
             print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
         optimizer.step()
+
+    print("\n----------------------------------------------------------------------------------\n")
+    print('Trained model parameters:')
+    named_parameters = list(gp.named_parameters())
+    param_conversion = torch.nn.Softplus()
+
+    raw = True
+    for j in range(len(named_parameters)):
+        if raw:
+            print(named_parameters[j][0], named_parameters[j][1].data) #.item()
+        else :
+            print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+    print("\n----------------------------------------------------------------------------------\n")
 
         # enforce constraints (heuristics)
         #gp.covar_module.model_parameters.signal_variance_2 = torch.nn.Parameter(abs(gp.covar_module.model_parameters.signal_variance_2))
@@ -122,15 +135,6 @@ def pretrain(system_matrix, num_tasks:int, time_obj:Time_Def, optim_steps:int, r
 
     optimize_mpc_gp(model, train_x, training_iterations=optim_steps)
 
-    print("\n----------------------------------------------------------------------------------\n")
-    print('Trained model parameters:')
-    named_parameters = list(model.named_parameters())
-    param_conversion = torch.nn.Softplus()
-
-    for j in range(len(named_parameters)):
-        print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
-    print("\n----------------------------------------------------------------------------------\n")
-
 
     return model, mask
 
@@ -143,7 +147,7 @@ def predict_reference(model:LODEGP, step_time:Time_Def, states:State_Description
             convergence = True
             print(f'Target reached at time {t_i}')
 
-        reference = np.tile(states.target, (step_time.count+1, 1))
+        reference = np.tile(states.target, (step_time.count, 1)) #FIXME
     
     else:
         _reference = inference_mpc_gp(model, t_reference)
@@ -161,8 +165,8 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
     # init time
     step_count = int(ceil(control_time.step / sim_time.step))
     
-    gp_steps =   int(control_time.count * step_count + 1)
-    sim_steps = int(sim_time.count + 1)
+    gp_steps =   int((control_time.count-1) * step_count + 1) #TODO +1
+    sim_steps = int(sim_time.count ) #TODO + 1
 
     t_sim = np.linspace(0, sim_time.end, sim_steps)
     t_gp = np.linspace(0, control_time.end , gp_steps)
@@ -182,13 +186,15 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
     t_ref = np.array([0, control_time.end])
 
     # control loop
-    for i in range(control_time.count):
+    for i in range(control_time.count - 1):
         # init time
         t_i = i * control_time.step
         x_i = x_sim[i*step_count]
         ref_time = Time_Def(t_i, control_time.end, step=control_time.step)#* dt_step TODO: dt_step
         step_time = Time_Def(t_i, t_i + control_time.step , step=sim_time.step)
         #print(f'Iter {i}, time: {t_i}')
+        start_idx = i*step_count+1
+        end_idx = (i+1)*step_count+1
 
         t_past = torch.linspace(t_i - reference_strategy['past-values'] * control_time.step, t_i-control_time.step, reference_strategy['past-values'])
         t_past = t_past[t_past >= 0]
@@ -199,14 +205,14 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
         update_gp(model, t_setpoint, setpoint, manual_noise, optim_steps)
         t_reference, reference,  convergence = predict_reference(model, step_time, states, x_i, t_i, convergence, EARLY_CONVERGENCE)
         
-        x_lode[i*step_count+1:(i+1)*step_count+1] = reference[1::]
+        x_lode[start_idx:end_idx] = reference[1::]
         u_ref = reference[:,system.state_dimension:system.state_dimension+system.control_dimension]#.flatten()
 
         # simulate system
-        u_sim[i*step_count+1:(i+1)*step_count+1] = u_ref[1::]
+        u_sim[start_idx:end_idx] = u_ref[1::]
         sol = solve_ivp(system.stateTransition, [step_time.start, step_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=t_reference.numpy(), args=(u_sim, step_time.step ), max_step=step_time.step)#, max_step=dt ,  atol = 1, rtol = 1
         x_sim_current = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
-        x_sim[i*step_count+1:(i+1)*step_count+1] =    x_sim_current
+        x_sim[start_idx:end_idx] = x_sim_current
 
         if plot_single_steps and t_i > 1000:
             t_reference_2 = torch.linspace(step_time.start, control_time.end, control_time.count +1)
@@ -218,16 +224,18 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
             plot_results(train_data, test_data, sim_data)# 
 
     # simulate the remainding time with constant control input 
+    #Shouldnt happen anymore:
     if sim_time.end > control_time.end:
         u_sim[(i+1)*step_count+1::] = states.equilibrium[system.state_dimension::]
         x_i = x_sim[(i+1)*step_count]
-        t_reference = np.linspace(control_time.end, sim_time.end, int((sim_time.end - control_time.end)/sim_time.step+1))
+        t_reference = np.linspace(control_time.end, sim_time.end, int((sim_time.end - control_time.end)/sim_time.step)) #TODO + 1
 
         sol = solve_ivp(system.stateTransition, [control_time.end, sim_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=t_reference, args=(u_sim, step_time.step ))#, max_step=dt ,  atol = 1, rtol = 1
         x_sim_current = np.concatenate([sol.y.transpose()[1::], u_sim[(i+1)*step_count:-1]], axis=1)
 
         x_sim[(i+1)*step_count+1::] =    x_sim_current
-        
+    
+    # x_lode[-1] = x_lode[-2] #FIXME  
     sim_data = Data_Def(t_sim, x_sim, system.state_dimension, system.control_dimension)
     lode_data = Data_Def(t_gp, x_lode, system.state_dimension, system.control_dimension)
     train_data = Data_Def(t_ref, x_ref, system.state_dimension, system.control_dimension)
@@ -259,7 +267,7 @@ def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_De
     end_time = time_obj.start + constraint_points * time_obj.step
 
     if end_time > time_obj.end:
-        end_time = time_obj.end - time_obj.step
+        end_time = time_obj.end  #FIXME: - time_obj.step
         constraint_points = int((end_time - time_obj.start) / time_obj.step)
         
 

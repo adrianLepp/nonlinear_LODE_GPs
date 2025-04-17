@@ -117,7 +117,7 @@ class LODEGP(gpytorch.models.ExactGP):
         else:
             self.covar_module = LODE_Kernel(A, self.common_terms, verbose=True)
 
-    def forward(self, X):
+    def forward(self, X, **kwargs):
         if not torch.equal(X, self.train_inputs[0]):
             self.common_terms["t_diff"] = X-X.t()
             self.common_terms["t_sum"] = X+X.t()

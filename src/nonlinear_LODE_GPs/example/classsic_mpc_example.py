@@ -8,11 +8,21 @@ rel_do_mpc_path = os.path.join('..','..')
 sys.path.append(rel_do_mpc_path)
 
 from nonlinear_LODE_GPs.systems.nonlinear_watertank import Parameter
+from nonlinear_LODE_GPs.helpers import *
+from result_reporter.latex_exporter import create_mpc_plot, save_plot_to_pdf
 
 # Import do_mpc package:
 import do_mpc
 
-x_ref=[0.188,0.115]
+
+
+x_ref=[1.8807e-01, 1.1468e-01]
+u_ref = 3e-5
+
+x0 = np.array([0.08358817533129459, 0.05096839959225279]).reshape(-1,1) #2e-5
+
+dt = 0.1
+sim_length = 200
 
 model_type = 'continuous' # either 'discrete' or 'continuous'
 model = do_mpc.model.Model(model_type)
@@ -56,7 +66,7 @@ mpc = do_mpc.controller.MPC(model)
 
 setup_mpc = {
     'n_horizon': 100,
-    't_step': 0.1,
+    't_step': dt,
     'n_robust': 0,
     'store_full_solution': True,
 }
@@ -84,7 +94,7 @@ mpc.bounds['upper','_x', 'x'] = [0.6,0.6]
 
 _x = model.x
 
-mpc.set_rterm(u=10000)
+# mpc.set_rterm(u=10000)
 
 # mpc.set_nl_cons('x', _x['x'], ub=np.array(x_ref), soft_constraint=True, penalty_term_cons=1e3)
 
@@ -94,11 +104,9 @@ mpc.set_rterm(u=10000)
 mpc.setup()
 
 simulator = do_mpc.simulator.Simulator(model)
-simulator.set_param(t_step = 0.1)
+simulator.set_param(t_step = dt)
 
 simulator.setup()
-
-x0 = np.array([0.084, 0.051]).reshape(-1,1)
 
 simulator.x0 = x0
 mpc.x0 = x0
@@ -111,9 +119,19 @@ mpc.set_initial_guess()
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 # Customizing Matplotlib:
-mpl.rcParams['font.size'] = 18
-mpl.rcParams['lines.linewidth'] = 3
-mpl.rcParams['axes.grid'] = True
+# mpl.rcParams['font.size'] = 18
+# mpl.rcParams['lines.linewidth'] = 3
+# mpl.rcParams['axes.grid'] = True
+
+textWidth= 469.4704
+textWidth_cm = 8.4
+mpl.rcParams['text.usetex'] = True
+mpl.style.use('seaborn-v0_8-paper')
+mpl.style.use('tex')
+
+xLabel='Time ($\mathrm{s})$'
+yLabel='Water Level ($\mathrm{m}$)'
+
 
 mpc_graphics = do_mpc.graphics.Graphics(mpc.data)
 sim_graphics = do_mpc.graphics.Graphics(simulator.data)
@@ -139,10 +157,49 @@ ax[1].set_ylabel('volume flow')
 ax[1].set_xlabel('time [s]')
 
 u0 = np.zeros((1,1))
-for i in range(250):
-    u0 = mpc.make_step(x0)
+
+u_data = [u0]
+x_data = [x0]
+for i in range(int(sim_length / dt)):
+    if np.isclose(x0, x_ref, rtol=1e-2).all():
+        u0= u_ref
+    else:
+        u0 = mpc.make_step(x0)
+
     xu0 = simulator.make_step(u0)
     x0 =xu0[0:2]
+    u_data.append(u0)
+    x_data.append(x0)
+
+
+u_np = np.array(u_data)
+x_np = np.array(x_data)
+full_data = np.stack((x_np[:,0,:], x_np[:,1,:], u_np[:,0,:])).squeeze()
+time = np.linspace(0,sim_length,int(sim_length / dt) + 1)
+
+test_data = Data_Def(time, full_data, 2, 1)
+# reference_data = {
+#     'time': np.array([0, sim_length]),
+#     'f1': np.array([x_ref[0], x_ref[0]]),
+#     'f2': np.array([x_ref[1], x_ref[1]]),
+#     'f3': np.array([u_ref, u_ref]),
+# }
+
+reference_data = {
+    'time': test_data.time,
+    'f1': test_data.y[0,:],
+    'f2': test_data.y[1,:],
+    'f3': test_data.y[2,:],
+}
+
+fig = create_mpc_plot(None, None, ['x1','x2', 'u'], 'Time ($\mathrm{s})$', 'Water Level ($\mathrm{m}$)', reference_data, x_e=[x_ref[0],x_ref[1],u_ref])
+
+
+
+plt.show()
+
+save_plot_to_pdf(fig, f'mpc_plot_classic_1')
+
 
 sim_graphics.plot_results()
 # Reset the limits on all axes in graphic to show the data.

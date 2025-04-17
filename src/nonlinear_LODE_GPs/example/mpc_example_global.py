@@ -2,7 +2,7 @@
 # from sage.all import *
 # import sage
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
-from kernels import *
+from nonlinear_LODE_GPs.kernels import *
 import torch
 
 # ----------------------------------------------------------------------------
