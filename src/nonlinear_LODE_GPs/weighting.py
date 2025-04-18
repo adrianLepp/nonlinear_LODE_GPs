@@ -262,3 +262,75 @@ class Epanechnikov_Weight(gpytorch.Module):
         x1_eq_x2 = torch.equal(x1, x2)
         dist_func = sq_dist if square_dist else dist
         return dist_func(x1, x2, x1_eq_x2)
+    
+
+class Mahalanobis_Distance(gpytorch.Module):
+    def __init__(self, center:torch.Tensor, scale_prior=None, scale_constraint=None, shared_weightscale=False):
+        super(Mahalanobis_Distance, self).__init__()
+        self.center = center
+        self.num_tasks = 3 #FIXME
+
+        self.shared_weightscale = shared_weightscale
+        if not shared_weightscale:
+
+
+            self.register_parameter(
+                name='raw_scale', parameter=torch.nn.Parameter(torch.ones(1, 1)*1200)
+            )
+            
+            if scale_constraint is not None:
+                self.register_constraint("raw_scale", scale_constraint)
+            
+            if scale_prior is not None:
+                self.register_prior(
+                    "scale_prior",
+                    scale_prior,
+                    lambda m: m.scale,
+                    lambda m, v : m._set_scale(v),
+                )
+
+    @property
+    def scale(self):
+        if hasattr(self, "raw_scale_constraint"):
+            return self.raw_scale_constraint.transform(self.raw_scale)
+        return self.raw_scale
+
+    @scale.setter
+    def scale(self, value):
+        return self._set_scale(value)
+
+    def _set_scale(self, value):
+        if not torch.is_tensor(value):
+            value = torch.as_tensor(value).to(self.raw_scale)
+        # when setting the paramater, transform the actual value to a raw one by applying the inverse transform
+        if hasattr(self, "raw_scale_constraint"):
+            self.initialize(raw_scale=self.raw_scale_constraint.inverse_transform(value))
+        else:
+            self.initialize(raw_scale=value)
+
+    def mahalanobis_dist(self, distribution:gpytorch.distributions.Distribution, sqrt=True):
+        distance = distribution.mean - self.center
+        
+        md = (distance @ distribution.covariance_matrix.inverse() @ distance.t()).squeeze()
+        if sqrt:
+            return torch.sqrt(md)
+        else:
+            return md
+
+    def forward(self, dist:gpytorch.distributions.Distribution, scale=None):
+        if not isinstance(dist, gpytorch.distributions.Distribution):
+            raise ValueError('Input must be a gpytorch distribution')
+        
+        if not self.shared_weightscale:
+            scale = self.scale
+        
+        N = dist.mean.shape[0]
+
+        # md = torch.stack([self.mahalanobis_dist(dist[i, :], sqrt = False) for i in range(N)])
+        md = torch.stack([self.mahalanobis_dist(dist[i, :], sqrt = True) for i in range(N)])
+        # weights = torch.exp(-0.5 * md.div(self.scale))
+        weights = md.div(self.scale**2)
+        return weights.t()
+        # weight = torch.stack([self.mahalanobis_dist(dist[i, :]) for i in range(N)])
+        
+        # return weight.div(self.scale).t()

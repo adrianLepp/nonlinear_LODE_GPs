@@ -72,7 +72,8 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             model = LODEGP(train_x_subset, train_y_subset, likelihood, num_tasks, system_matrices[i], mean_module)
 
             w_fcts.append(Weight_Model(centers[i], shared_weightscale=shared_weightscale))
-            # w_fcts[i].initialize(length=torch.tensor(weight_lengthscale, requires_grad=True))#TODO
+            # if weight_lengthscale is not None:
+            #     w_fcts[i].initialize(scale=torch.tensor(weight_lengthscale))#TODO
             
             # w_fcts[i].length = weight_lengthscale# TODO: add weight model specific paremeter beforehand to the model
             models.append(model)
@@ -93,14 +94,22 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
         for model in self.models:
             optimize_gp(model, training_iterations=training_iterations, verbose=verbose)
 
-    def optimize(self, training_iterations=100, verbose=False):
+    def optimize(self, training_iterations=100, verbose=False, learning_rate=0.1):
         self.train()
         self.likelihood.train()
         for model in self.models:
             model.eval()
             model.likelihood.eval()
 
-        optimizer = torch.optim.Adam(self.parameters(), lr=3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        # optimizer = torch.optim.Adam(
+        #     list(self.w_fcts[0].parameters()) +
+        #     list(self.w_fcts[1].parameters()) +
+        #     list(self.w_fcts[2].parameters()) +
+        #     list(self.w_fcts[3].parameters()) +
+        #     list(self.w_fcts[4].parameters()) 
+        #     , lr=learning_rate)
+            
 
         # mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self)
         mll = gpytorch.mlls.LeaveOneOutPseudoLikelihood(self.likelihood, self)
@@ -122,13 +131,16 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             
             weights = torch.stack(weight_list, dim=1)
             weight_sums = weights.sum(dim=1)
-            weight_loss = ((weight_sums - 1) ** 2).mean()
+            weight_loss = ((weight_sums - 1) ** 2)
+            
+            weight_loss_max = weight_loss.max()
+            weight_loss_mean = weight_loss.max()
 
-            total_loss = weight_loss # + loss
+            total_loss = weight_loss_mean# + loss
             total_loss.backward()
 
             if verbose is True:
-                print('Iter %d/%d - Loss: %.3f - weight-loss %.3f' % (i + 1, training_iterations, loss.item(), weight_loss.item()))
+                print('Iter %d/%d - Loss: %.3f - weight-loss %.3f' % (i + 1, training_iterations, loss.item(), weight_loss_mean.item()))
             optimizer.step()
 
             training_loss.append(total_loss.item())
