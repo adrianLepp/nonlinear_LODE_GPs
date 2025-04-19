@@ -53,6 +53,8 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
 
         self.train_data_subsets = []
 
+        self.true_centers = []
+
         if clustering:
             distances = torch.cdist(train_y.unsqueeze(0), torch.stack(centers).unsqueeze(0)).squeeze(0)
             cluster_assignments = torch.argmin(distances, dim=0)
@@ -61,6 +63,8 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
                 self.train_data_subsets.append((train_x[cluster_indices], train_y[cluster_indices]))
                 if not self.output_weights:
                     centers[i] = train_x[cluster_indices[cluster_indices.shape[0]//2]].unsqueeze(0).unsqueeze(0)
+                    self.true_centers.append(train_y[cluster_indices[cluster_indices.shape[0]//2]])
+                    
                 
 
         for i in range(len(system_matrices)):

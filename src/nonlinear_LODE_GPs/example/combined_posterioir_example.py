@@ -2,17 +2,15 @@
 
 
 import gpytorch 
-# from sage.all import *
-# import sage
-#https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
-from sage.calculus.var import var
-from nonlinear_LODE_GPs.kernels import *
-from nonlinear_LODE_GPs.mean_modules import *
 import torch
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.metrics import mean_squared_error
+
+from result_reporter.latex_exporter import plot_states, plot_weights, plot_trajectory, plot_error, save_plot_to_pdf
 
 # ----------------------------------------------------------------------------
-from nonlinear_LODE_GPs.lodegp import *
-from nonlinear_LODE_GPs.helpers import *
+from nonlinear_LODE_GPs.helpers import get_config, Time_Def, load_system, simulate_system, downsample_data, save_everything, plot_results,  Data_Def, State_Description
 from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight, Epanechnikov_Weight
 from nonlinear_LODE_GPs.combined_posterior import CombinedPosterior_ELODEGP
 
@@ -21,13 +19,13 @@ device = 'cpu'
 
 
 local_predictions = False
-SAVE = False
+SAVE = True
 system_name = "nonlinear_watertank"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 optim_steps_single = 300
-optim_steps =100
+optim_steps =500
 
 equilibrium_controls = [
     0.1, # [2.0897e-02, 1.2742e-02, 1.0000e-05]
@@ -49,7 +47,7 @@ x0 = torch.tensor([0.0, 0.0])
 t0 = 0.0
 t1 = 200.0
 
-downsample =20
+downsample =50
 sim_time = Time_Def(t0, t1, step=0.1)
 train_time = Time_Def(t0, t1, step=sim_time.step*downsample)
 test_time = Time_Def(t0, t1, step=0.1)
@@ -114,25 +112,30 @@ with torch.no_grad():
     lower, upper = output.confidence_region()
 
 train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
+sim_data = Data_Def(_train_x.numpy(), _train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
 test_data = Data_Def(test_x.numpy(), estimate.detach().numpy(), system.state_dimension, system.control_dimension, test_time, uncertainty={
                 'variance': output.variance,
                 'lower': lower.detach().numpy(),
                 'upper': upper.detach().numpy(),
                 }, )
 
-plot_results(train_data, test_data)
-plot_weights(test_x, weights, title="Weighting Function")
+# plot_results(train_data, test_data)
+fig_results = plot_states([test_data, sim_data, train_data ], data_names=['mixture model', 'simulation', 'training data'])
+weight_plot = plot_weights(test_x, weights)
+
 
 
 equilibriums = [torch.stack(equilibriums)[:,0], torch.stack(equilibriums)[:,1]]
+centers = [torch.zeros_like(equilibriums[0]),torch.zeros_like(equilibriums[0])]
 
-plt.figure()
-plt.plot(test_data.y[:,0],test_data.y[:,1], label='GP')
-plt.plot(equilibriums[0],equilibriums[1], 'x', label='Equilibrium')
-plt.xlabel('Angle [rad]')
-plt.ylabel('Angular Velocity [rad/s]')
-plt.legend()
-plt.grid(True)
+
+for i, center in enumerate(model.true_centers):
+    centers[0][i] = center[0]
+    centers[1][i] = center[1]
+
+trajectory_plot = plot_trajectory(test_data, {'equilibrium points': equilibriums, 'model centers': centers})
+
+
 
 
 if local_predictions:
@@ -156,20 +159,36 @@ states = State_Description(
     # equilibrium=torch.stack(equilibriums), 
     init=x0, 
     min=None, max=None)
-# ----------------------------------------------------------------------------  
+
+
+error_gp = Data_Def(test_data.time, abs(test_data.y - sim_data.y), system.state_dimension, system.control_dimension) 
+rmse_gp = np.sqrt(mean_squared_error(sim_data.y, test_data.y))
+std_gp = np.std(error_gp.y)
+
+print(f"GP Model RMSE: {rmse_gp}, Standard Deviation: {std_gp}")
+
+
+error_data_gp = error_gp.to_report_data()
+
+
+fig_error = plot_error(error_data_gp, header=['x1', 'x2', 'u1'], uncertainty = None)# output.variance
 
 plt.show()
 
 if SAVE:
     config['model_id'] = MODEL_ID
     config['simulation_id'] = SIM_ID
+    save_plot_to_pdf(fig_error, f'error_plot_{SIM_ID}')
+    save_plot_to_pdf(fig_results, f'results_plot_{SIM_ID}')
+    save_plot_to_pdf(trajectory_plot, f'trajectory_plot_{SIM_ID}')
+    save_plot_to_pdf(weight_plot, f'weight_plot_{SIM_ID}')
     save_everything(
         system_name, 
         model_path, 
         config, 
         train_data, 
         test_data, 
-        sim_data=None, 
+        sim_data=sim_data, 
         init_state=states.init.numpy(), 
         system_param=states.equilibrium.numpy(), 
         model_dict=model.state_dict()
