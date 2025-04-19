@@ -309,9 +309,9 @@ class Mahalanobis_Distance(gpytorch.Module):
             self.initialize(raw_scale=value)
 
     def mahalanobis_dist(self, distribution:gpytorch.distributions.Distribution, sqrt=True):
-        distance = distribution.mean - self.center
+        distance = distribution.mean.detach() - self.center
         
-        md = (distance @ distribution.covariance_matrix.inverse() @ distance.t()).squeeze()
+        md = (distance @ distribution.covariance_matrix.detach().inverse() @ distance.t()).squeeze()
         if sqrt:
             return torch.sqrt(md)
         else:

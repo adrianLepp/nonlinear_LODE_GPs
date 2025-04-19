@@ -25,8 +25,8 @@ system_name = "nonlinear_watertank"
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 optim_steps_single = 300
-optim_steps =1000
-learning_rate = .3
+optim_steps =500
+learning_rate = 3
 
 equilibrium_controls = [
     0.1, # [2.0897e-02, 1.2742e-02, 1.0000e-05]
@@ -88,12 +88,12 @@ model = CombinedPosterior_ELODEGP(
     system_matrices, 
     equilibriums, 
     centers,
-    Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
+    Mahalanobis_Distance, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
     # weight_lengthscale=torch.tensor([100]),
     shared_weightscale=False,
     # additive_se=True,
     clustering=True,
-    output_weights=False,
+    output_weights=True,
     )#, 
 model._optimize(optim_steps_single)
 model.optimize(optim_steps, verbose=True, learning_rate=learning_rate)
