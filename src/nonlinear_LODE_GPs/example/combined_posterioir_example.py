@@ -10,8 +10,8 @@ from sklearn.metrics import mean_squared_error
 from result_reporter.latex_exporter import plot_states, plot_weights, plot_trajectory, plot_error, save_plot_to_pdf
 
 # ----------------------------------------------------------------------------
-from nonlinear_LODE_GPs.helpers import get_config, Time_Def, load_system, simulate_system, downsample_data, save_everything, plot_results,  Data_Def, State_Description
-from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight, Epanechnikov_Weight
+from nonlinear_LODE_GPs.helpers import get_config, Time_Def, load_system, simulate_system, downsample_data, save_everything, plot_results,  Data_Def, State_Description, get_ode_from_spline
+from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight, Epanechnikov_Weight, Mahalanobis_Distance
 from nonlinear_LODE_GPs.combined_posterior import CombinedPosterior_ELODEGP
 
 torch.set_default_dtype(torch.float64)
@@ -19,7 +19,7 @@ device = 'cpu'
 
 
 local_predictions = False
-SAVE = True
+SAVE = False
 system_name = "nonlinear_watertank"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
@@ -87,7 +87,7 @@ model = CombinedPosterior_ELODEGP(
     system_matrices, 
     equilibriums, 
     centers,
-    Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight
+    Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
     # weight_lengthscale=torch.tensor([100]),
     shared_weightscale=False,
     # additive_se=True,
@@ -159,6 +159,8 @@ states = State_Description(
     # equilibrium=torch.stack(equilibriums), 
     init=x0, 
     min=None, max=None)
+
+_, _ = get_ode_from_spline(system, np.maximum(test_data.y, 0), test_data.time)
 
 
 error_gp = Data_Def(test_data.time, abs(test_data.y - sim_data.y), system.state_dimension, system.control_dimension) 
