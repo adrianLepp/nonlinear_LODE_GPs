@@ -96,9 +96,9 @@ class Controller_Kernel(Kernel):
             return ret
         else:
             ret = u_1 @ k @ u_2
-            _u_1 = self.control_law(x1)
-            _u_2 = self.control_law(x2)
-            _ret = _u_1.t() * k * _u_2
+            # _u_1 = self.control_law(x1)
+            # _u_2 = self.control_law(x2)
+            # _ret = _u_1.t() * k * _u_2
         return ret
         
         

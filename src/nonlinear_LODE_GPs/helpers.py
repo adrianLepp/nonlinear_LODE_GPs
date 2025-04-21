@@ -71,6 +71,19 @@ class Data_Def():
         for i in range(self.state_dim + self.control_dim):
             data[f'f{i+1}'] = self.y[:,i]
         return data
+    
+    def downsample(self,factor=10):
+        t_redux = self.time.clone()[::factor]
+        y_redux = self.y.clone()[::factor,:]
+        return Data_Def(t_redux, y_redux, self.state_dim, self.control_dim, self.time_def, self.uncertainty, self.y_names)
+    
+    def add_noise(self, noise:torch.Tensor):
+        if isinstance(self.y, torch.Tensor):
+            y_noise = self.y + torch.randn(self.y.shape) * noise
+        else:
+            y_noise = self.y + np.random.randn(self.y.shape) * noise
+        return Data_Def(self.time, y_noise, self.state_dim, self.control_dim, self.time_def, self.uncertainty, self.y_names)
+    
 
 def load_system(system_name:str, **kwargs):
 

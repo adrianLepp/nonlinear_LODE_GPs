@@ -94,13 +94,8 @@ def get_linearizing_feedback(gp:LODEGP, sim_configs:List[Simulation_Config], sys
         gp.set_train_data(train_x, train_y, strict=False)
 
         with gpytorch.settings.observation_nan_policy('mask'):
-            if model_config['load']:
-                gp.load_state_dict(torch.load(model_config['model_path'], map_location=model_config['device']))
-            else:
-                optimize_gp(gp, optim_steps)
+            optimize_gp(gp, optim_steps)
 
-            if model_config['save']:
-                torch.save(gp.state_dict(), model_config['model_path'])
             gp.eval()
             gp.likelihood.eval()
 
@@ -130,7 +125,8 @@ def get_feedback_controller(
         lodegp_data:List[Data_Def], 
         optim_steps:int, 
         ControlGP_Class: Linearizing_Control_2 | Linearizing_Control_4,
-        controlGP_kwargs:dict
+        controlGP_kwargs:dict,
+        model_config,
         ):
     '''
     III: use the learned linearizing feedback controller to learn the nonlinearities of the system
@@ -153,8 +149,16 @@ def get_feedback_controller(
         var.append(_var[:,-1])
 
     control_gp = ControlGP_Class(x, u, y_ref, variance=var, **controlGP_kwargs) #, b = 0.1, controller=controller
-    with gpytorch.settings.observation_nan_policy('mask'):
-        control_gp.optimize(optim_steps * 3, verbose=True)
+
+    if model_config['load']:
+        control_gp.load_state_dict(torch.load(model_config['model_path'], map_location=model_config['device']))
+    else:
+        with gpytorch.settings.observation_nan_policy('mask'):
+            control_gp.optimize(optim_steps * 3, verbose=True)
+
+    if model_config['save']:
+                torch.save(control_gp.state_dict(), model_config['model_path'])
+    
     
     return control_gp
 
@@ -217,16 +221,18 @@ def learn_system_nonlinearities(
     # I
     system_data = get_state_trajectories(system, sim_configs, controlGP_kwargs['controller'])
 
+    system_data_noise = [sys_data.add_noise(controlGP_kwargs['noise']) for sys_data in system_data]
+
     # II
     likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(
         num_tasks=system.dimension,
         noise_constraint=gpytorch.constraints.GreaterThan(torch.tensor(1e-15))
     )
     lodegp = LODEGP(None, None, likelihood, system.dimension, system.get_ODEmatrix())
-    lodegp_data = get_linearizing_feedback(lodegp, sim_configs, system_data, optim_steps, model_config)
+    lodegp_data = get_linearizing_feedback(lodegp, sim_configs, system_data_noise, optim_steps, model_config)
 
     # III
-    control_gp = get_feedback_controller(sim_configs, system_data, lodegp_data, optim_steps, ControlGP_Class, controlGP_kwargs)
+    control_gp = get_feedback_controller(sim_configs, system_data_noise, lodegp_data, optim_steps, ControlGP_Class, controlGP_kwargs, model_config)
 
     alpha, beta = control_gp.get_nonlinear_fcts()
 
@@ -252,4 +258,4 @@ def learn_system_nonlinearities(
 
         
 
-    return alpha, beta
+    return alpha, beta, control_gp

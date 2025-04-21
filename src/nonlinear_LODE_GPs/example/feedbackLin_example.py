@@ -1,7 +1,7 @@
 
 #https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
 import torch
-from result_reporter.latex_exporter import plot_states
+from result_reporter.latex_exporter import plot_states, surface_plot, plot_trajectory, save_plot_to_pdf, plot_single_states
 import numpy as np
 import matplotlib.pyplot as plt
 import gpytorch
@@ -15,7 +15,7 @@ from scipy.integrate import solve_ivp
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = False
+SAVE = True
 
 system_name = "inverted_pendulum"
 
@@ -25,17 +25,17 @@ model_dir=config['model_dir']
 data_dir=config['data_dir']
 model_name = config['model_name']
 name =  '_' + model_name + "_" + system_name
-model_path = f'{model_dir}/1{name}.pth'
+model_path = f'{model_dir}/2{name}.pth'
 
 model_config = {
     'device': device,
     'model_path': model_path,
-    'load': False,
+    'load': True,
     'save': False,
 }
 
 
-t  = 10
+t  = 5
 optim_steps = 100
 downsample = 20
 sim_time = Time_Def(0, t, step=0.01)
@@ -45,44 +45,22 @@ test_time = Time_Def(0, t, step=0.01)
 a0 = 2
 a1 = 3
 v = 0
+noise = torch.tensor([1e-3, 1e-3, 0], dtype=torch.float64)
 
 system = load_system(system_name, a0=0, a1=0, v=1)
 controller_0 = Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]))
 
 sim_configs = [
-    # Simulation_Config(sim_time, [np.pi/2 - 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [np.pi/2 + 0.1 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.ones((sim_time.count,1)), downsample, 'u=1'),
-    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.ones((sim_time.count,1)), downsample, 'u=-1'),
-
-    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()), downsample, 'sin'),
-    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], -np.sin(sim_time.linspace()), downsample, '-sin'),
-    # Simulation_Config(sim_time, [np.pi/2 , 0 ,0], np.sin(sim_time.linspace()**2/4), downsample, 'sin^2'),
-
-
     Simulation_Config(sim_time, [np.pi/2  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [np.pi/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    Simulation_Config(sim_time, [-np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
     Simulation_Config(sim_time, [-np.pi/2 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
 
-    # Simulation_Config(sim_time, [-np.pi/8 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [np.pi/8 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [-np.pi*5/8 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [np.pi*5/8 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [np.pi/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [-np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
 
-
-
-    # Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [2*np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [0 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-
-    # Simulation_Config(sim_time, [np.pi*6/2  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [np.pi*12/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [-np.pi*12/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [-np.pi*6/2 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-
-    # Simulation_Config(sim_time, [3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
-    # Simulation_Config(sim_time, [-3*np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [3* np.pi/4  , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [-3 * np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    
+    Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
 ]
 
 
@@ -93,20 +71,69 @@ control_gp_kwargs = {
     'b' : 110,
     'a' : torch.tensor([[a0],[a1]], dtype=torch.float64),
     'v' : torch.tensor([v], dtype=torch.float64),
-    'controller':controller_0 # controller_0 # None  
+    'controller':controller_0, # controller_0 # None  
+    'noise': noise,
 }
 
-alpha, beta = learn_system_nonlinearities(
+alpha, beta, control_gp = learn_system_nonlinearities(
     system, 
     sim_configs, 
     optim_steps, 
-    ControlGP_Class = Linearizing_Control_5,# CompositeModel
+    ControlGP_Class = CompositeModel, #Linearizing_Control_5,# CompositeModel
     controlGP_kwargs = control_gp_kwargs,
-    plot=True, 
+    plot=False, 
     model_config=model_config,
     )
 
 v = 0
+
+# -----------------------------------------------------------------
+# Plot surface of alpha and beta
+# -----------------------------------------------------------------
+
+l = 100
+val = 3* torch.pi / 4
+x_min = [-val, -val]
+x_max = [torch.pi, val ]
+
+test_points1, test_points2 = torch.meshgrid(
+            torch.linspace(x_min[0], x_max[0], l),
+            torch.linspace(x_min[1], x_max[1], l)
+        )
+test_points = torch.stack([test_points1.flatten(), test_points2.flatten()], dim=-1)
+
+beta_system = torch.zeros_like(control_gp.train_targets)
+alpha_system = torch.zeros_like(control_gp.train_targets)
+for i in range(control_gp.train_targets.shape[0]):
+    alpha_system[i] = system.alpha(control_gp.train_inputs[0][i].numpy())
+    beta_system[i] = system.beta(control_gp.train_inputs[0][i].numpy())
+
+
+test_alpha = alpha(test_points).squeeze()
+test_beta = beta(test_points, 0).squeeze()
+
+fig_alpha = surface_plot(
+    test_points1.numpy(),
+    test_points2.numpy(),
+    test_alpha.detach().numpy().reshape(l, l),
+    control_gp.train_inputs[0][:,0].numpy(),
+    control_gp.train_inputs[0][:,1].numpy(),
+    alpha_system.numpy(),
+    [r'$x_1$', r'$x_2$', r'$\alpha$'],
+    [r'$\hat{\alpha}(\boldmath{x})$', r'${\alpha(\boldmath{x})}$']
+)
+
+fig_beta = surface_plot(
+    test_points1.numpy(),
+    test_points2.numpy(),
+    test_beta.detach().numpy().reshape(l, l),
+    control_gp.train_inputs[0][:,0].numpy(),
+    control_gp.train_inputs[0][:,1].numpy(),
+    beta_system.numpy(),
+    [r'$x_1$', r'$x_2$', r'$\beta$'],
+    [r'$\hat{\beta}(\boldmath{x})$', r'${\beta(\boldmath{x})}$']
+)
+
 
 # -----------------------------------------------------------------
 # TEST CONTROLLER
@@ -153,21 +180,37 @@ with gpytorch.settings.observation_nan_policy('mask'):
 
 fig_results = plot_states(
     control_data,
-    data_names = ['Sim_gp', "sim", 'simple'], 
-    header= [r'$\phi$', r'$\dot{\phi}$', r'$u_1$'], yLabel=['Angle [°]', 'Force [N]'],
+    data_names = ['GP', "exact feedback", r'$u_0$'], 
+    header= [r'$x_1$', r'$x_2$', r'$u$'], yLabel=['Angle (rad)', 'Force (N)'],
     title = f'Inverted Pendulum GP Control: a0: {a0}, a1: {a1}, v: {v}'
     )
 
-plt.figure()
-plt.plot(control_data[0].y[:,0],control_data[0].y[:,1], label='GP')
-plt.plot(control_data[1].y[:,0],control_data[1].y[:,1], label='Feedback')
-plt.plot(control_data[2].y[:,0],control_data[2].y[:,1], label='Simple')
-plt.xlabel('Angle [rad]')
-plt.ylabel('Angular Velocity [rad/s]')
-plt.legend()
-plt.grid(True)
+
+figure = plot_single_states(
+    control_data,
+    ['GP', "exact feedback", r'$u_0$'],
+    header= [r'$x_1$', r'$x_2$', r'$u$'], 
+    yLabel=['angle (rad)', 'angular velocity (rad/s) ', 'force (N) '],
+)
+
+
+trajectory_plot = plot_trajectory(control_data, {}, ax_labels=['angle (rad)', 'angular velocity (rad/s)'], labels = ['GP', "exact feedback", r'$u_0$'])
+
+# plt.figure()
+# plt.plot(control_data[0].y[:,0],control_data[0].y[:,1], label='GP')
+# plt.plot(control_data[1].y[:,0],control_data[1].y[:,1], label='Feedback')
+# plt.plot(control_data[2].y[:,0],control_data[2].y[:,1], label='Simple')
+# plt.xlabel('Angle [rad]')
+# plt.ylabel('Angular Velocity [rad/s]')
+# plt.legend()
+# plt.grid(True)
 
 plt.show()
 
-# save_plot_to_pdf(fig_results, f'results_plot_{SIM_ID}')
 
+if SAVE:
+    save_plot_to_pdf(fig_alpha, f'alpha_feedbackLin2')
+    save_plot_to_pdf(fig_beta, f'beta_feedbackLin2')
+    save_plot_to_pdf(fig_results, f'results_plot_feedbackLin2')
+    save_plot_to_pdf(trajectory_plot, f'trajectory_plot_feedbackLin2')
+    save_plot_to_pdf(figure, f'states_plot_feedbackLin2')
