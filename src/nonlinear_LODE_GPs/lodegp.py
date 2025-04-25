@@ -46,16 +46,20 @@ def optimize_gp(gp, training_iterations=100, verbose=True, hyperparameters:dict=
         training_loss.append(loss.item())
 
     
-
-    print("\n----------------------------------------------------------------------------------\n")
-    print('Trained model parameters:')
+    if verbose:
+        print("\n----------------------------------------------------------------------------------\n")
+        print('Trained model parameters:')
     named_parameters = list(gp.named_parameters())
     param_conversion = torch.nn.Softplus()
+    parameters = {}
 
     for j in range(len(named_parameters)):
-        print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+        if verbose:
+            print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+        parameters[named_parameters[j][0]] = param_conversion(named_parameters[j][1].data).tolist()
         # print(named_parameters[j][0], (named_parameters[j][1].data)) #.item()
-    print("\n----------------------------------------------------------------------------------\n")
+    if verbose:
+        print("\n----------------------------------------------------------------------------------\n")
 
     #print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
         #gp.likelihood.noise = torch.tensor(1e-8)
@@ -63,7 +67,7 @@ def optimize_gp(gp, training_iterations=100, verbose=True, hyperparameters:dict=
 
     #print(list(self.named_parameters()))
 
-    return training_loss
+    return training_loss, parameters
 
 
 class LODEGP(gpytorch.models.ExactGP):
@@ -115,7 +119,10 @@ class LODEGP(gpytorch.models.ExactGP):
                 gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=0
             )) + gpytorch.kernels.ScaleKernel(LODE_Kernel(A, self.common_terms))
         else:
-            self.covar_module = LODE_Kernel(A, self.common_terms, verbose=True)
+            self.covar_module = LODE_Kernel(A, self.common_terms, verbose=False)
+            #FIXME do we want rand
+            for name, param in self.covar_module.named_parameters():
+                param.data = torch.rand_like(param) * 3 -1.5 
 
     def forward(self, X, **kwargs):
         if not torch.equal(X, self.train_inputs[0]):

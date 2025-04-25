@@ -13,6 +13,8 @@ from nonlinear_LODE_GPs.mpc import mpc_algorithm, pretrain, optimize_mpc_gp, cre
 from nonlinear_LODE_GPs.lodegp import LODEGP
 from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 
+from result_reporter.latex_exporter import save_plot_to_pdf, create_mpc_plot
+
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
@@ -27,7 +29,7 @@ system_name = "nonlinear_watertank"
 
 
 
-def run_sim(hyperparameters):
+def run_sim(lengthscale, signal_variance):
     print("\n----------------------------------------------------------------------------------\n")
     try:
         with open(CONFIG_FILE,"r") as f:
@@ -78,7 +80,7 @@ def run_sim(hyperparameters):
     u_2 = 0.3 # control input to find equilibrium where we want to end and linearize around
 
     # TIME
-    t = 2000
+    t = 1000
 
     control_time = Time_Def(
         0, 
@@ -95,10 +97,11 @@ def run_sim(hyperparameters):
     # GP settings
     optim_steps = 0
     pretrain_steps = 00
-    # hyperparameters = {
-    #     'lengthscale_2': 4.7,
-    #     'signal_variance_2': -2.3, # negative
-    # }
+
+    hyperparameters = {
+        'lengthscale_2': torch.log(torch.exp(torch.tensor(lengthscale))-1), # 5.77
+        'signal_variance_2': torch.log(torch.exp(torch.tensor(signal_variance))-1), #
+    }
 
 
     system = load_system(system_name)
@@ -145,7 +148,7 @@ def run_sim(hyperparameters):
         optimize_mpc_gp(model, train_x, training_iterations=pretrain_steps)
 
         # model, mask = pretrain(system_matrix, num_tasks, control_time, pretrain_steps, reference_strategie, states, hyperparameters)# pretrain the system and generate gp model. eventually not necessary
-        sim_data, ref_data, lode_data = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
+        sim_data, ref_data, lode_data, settling_time = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
 
 
     # calc error
@@ -184,9 +187,18 @@ def run_sim(hyperparameters):
     print(f"Control error: {control_err}")
     print(f"Constraint violation: {constraint_viol}")
 
-
-    plot_results(ref_data, lode_data, sim_data)
+    reference_data = {
+        'time': sim_data.time,
+        'f1': sim_data.y[:,0],
+        'f2': sim_data.y[:,1],
+        'f3': sim_data.y[:,2],
+    }
+    fig = create_mpc_plot(None, None, ['x1','x2', 'u'], 'Time ($\mathrm{s})$', 'Water Level ($\mathrm{m}$)', reference_data, x_e=[states.target[0],states.target[1],states.target[2]])
     plt.show()
+    save_plot_to_pdf(fig, f'mpc_plot_l={lengthscale}_s={signal_variance}')
+
+    # plot_results(ref_data, lode_data, sim_data)
+    # plt.show()
 
     if SAVE:
         # torch.save(model.state_dict(), model_path)
@@ -208,24 +220,21 @@ def run_sim(hyperparameters):
         print(f"save data with data id {SIM_ID}")
 
 
+# run_sim(None)
 
 lengthscales = [
-    # 10, 
-    # 4.7, 
-    3.4
+    # 8, 
+    5, 
+    # 3.5
     ]
 s_variances = [
-    -2.3, 
-    # -2.9, 
-    -4
+    0.01, 
+    0.05, 
+    # 0.1
     ]
 
 for i in range(len(lengthscales)):
     for j in range(len(s_variances)):
-        hyperparameters = {
-            'lengthscale_2': lengthscales[i],
-            'signal_variance_2': s_variances[j], # negative
-        }
         print(f"lengthscale: {lengthscales[i]}, signal_variance: {s_variances[j]}")
-        run_sim(hyperparameters)
+        run_sim(lengthscales[i], s_variances[j])
         print("\n----------------------------------------------------------------------------------\n")

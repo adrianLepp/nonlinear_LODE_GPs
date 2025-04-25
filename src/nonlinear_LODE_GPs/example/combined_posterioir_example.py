@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import mean_squared_error
 
-from result_reporter.latex_exporter import plot_states, plot_weights, plot_trajectory, plot_error, save_plot_to_pdf
+from result_reporter.latex_exporter import plot_states, plot_weights, plot_trajectory, plot_error, save_plot_to_pdf, plot_single_states
 
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.helpers import get_config, Time_Def, load_system, simulate_system, downsample_data, save_everything, plot_results,  Data_Def, State_Description, get_ode_from_spline
@@ -20,6 +20,7 @@ device = 'cpu'
 
 local_predictions = False
 SAVE = False
+output_weights=False
 system_name = "nonlinear_watertank"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
@@ -47,8 +48,8 @@ x0 = torch.tensor([0.0, 0.0])
 
 t0 = 0.0
 t1 = 200.0
-
-downsample =50
+downsample = int(t1 / 0.1 / 50)
+# downsample =50
 sim_time = Time_Def(t0, t1, step=0.1)
 train_time = Time_Def(t0, t1, step=sim_time.step*downsample)
 test_time = Time_Def(t0, t1, step=0.1)
@@ -77,23 +78,30 @@ u = np.ones((sim_time.count,1)) * u_ctrl * system.param.u
 
 
 _train_x, _train_y= simulate_system(system, x0, sim_time, u)
-train_x, train_y = downsample_data(_train_x, _train_y, downsample)
+# train_x, train_y = downsample_data(_train_x, _train_y, downsample)
+
+sim_data = Data_Def(_train_x, _train_y, system.state_dimension, system.control_dimension,train_time)
+noise = torch.tensor([1e-5, 1e-5, 1e-7])
+noise = torch.tensor([0, 0, 0])
+train_data = sim_data.downsample(downsample).add_noise(noise)
+
+# train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
 
 likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
 model = CombinedPosterior_ELODEGP(
-    train_x, 
-    train_y, 
+    train_data.time, 
+    train_data.y, 
     likelihood, 
     num_tasks, 
     system_matrices, 
     equilibriums, 
     centers,
-    Mahalanobis_Distance, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
-    # weight_lengthscale=torch.tensor([100]),
+    Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
+    weight_lengthscale=torch.tensor([100]),
     shared_weightscale=False,
     # additive_se=True,
     clustering=True,
-    output_weights=True,
+    output_weights=output_weights,
     )#, 
 model._optimize(optim_steps_single)
 model.optimize(optim_steps, verbose=True, learning_rate=learning_rate)
@@ -112,8 +120,7 @@ with torch.no_grad():
     output = gpytorch.distributions.MultitaskMultivariateNormal(estimate, cov)
     lower, upper = output.confidence_region()
 
-train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
-sim_data = Data_Def(_train_x.numpy(), _train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
+
 test_data = Data_Def(test_x.numpy(), estimate.detach().numpy(), system.state_dimension, system.control_dimension, test_time, uncertainty={
                 'variance': output.variance,
                 'lower': lower.detach().numpy(),
@@ -121,13 +128,59 @@ test_data = Data_Def(test_x.numpy(), estimate.detach().numpy(), system.state_dim
                 }, )
 
 # plot_results(train_data, test_data)
-fig_results = plot_states([test_data, sim_data, train_data ], data_names=['mixture model', 'simulation', 'training data'])
+# fig_results = plot_states([test_data, sim_data, train_data ], data_names=['mixture model', 'simulation', 'training data'])
+
+state_figure = plot_single_states(
+                [test_data, sim_data, train_data],
+                ['local LODE-GP', "simulation", 'training' ],
+                header= ['$x_1$', '$x_2$', '$u_1$'], 
+                yLabel=['$x_1$ - fill level ($m$)', '$x_2$ - fill level ($m$)', '$u_1$ - flow rate ($m^3/s$) '],
+                line_styles = ['-', '--', '.'],
+                # colors = [i,5]               
+)
+
+
 weight_plot = plot_weights(test_x, weights)
+
+
+states = State_Description(
+    equilibrium=equilibriums[-1],
+    # equilibrium=torch.stack(equilibriums), 
+    init=x0, 
+    min=None, max=None)
+
+# _, _ = get_ode_from_spline(system, np.maximum(test_data.y, 0), test_data.time)
+
+
+error_gp = Data_Def(test_data.time, abs(test_data.y - sim_data.y.numpy()), system.state_dimension, system.control_dimension) 
+rmse_gp = np.sqrt(mean_squared_error(sim_data.y.numpy(), test_data.y))
+std_gp = np.std(error_gp.y)
+
+print(f"GP Model RMSE: {rmse_gp}, Standard Deviation: {std_gp}")
+
+
+error_data_gp = error_gp.to_report_data()
+
+
+# fig_error = plot_error(error_data_gp, header=['x1', 'x2', 'u1'], uncertainty = None)# output.variance
+
+err_figure = plot_single_states(
+                [error_gp],
+                ['local LODE-GP'],
+                header= ['$x_1$', '$x_2$', '$u_1$'], 
+                yLabel=['$x_1$ - absolute error ($m$)', '$x_2$ - absolute error ($m$)', '$u_1$ - absolute error ($m^3/s$) '],
+                line_styles = ['-'],
+                # colors = [i,5]               
+)
 
 
 
 equilibriums = [torch.stack(equilibriums)[:,0], torch.stack(equilibriums)[:,1]]
-centers = [torch.zeros_like(equilibriums[0]),torch.zeros_like(equilibriums[0])]
+
+if output_weights is True:
+    centers = None
+else:
+    centers = [torch.zeros_like(equilibriums[0]),torch.zeros_like(equilibriums[0])]
 
 
 for i, center in enumerate(model.true_centers):
@@ -152,29 +205,15 @@ if local_predictions:
                 'upper': upper.detach().numpy(),
                 }, )
 
-        plot_results(train_data, test_data)
-
-
-states = State_Description(
-    equilibrium=equilibriums[-1],
-    # equilibrium=torch.stack(equilibriums), 
-    init=x0, 
-    min=None, max=None)
-
-_, _ = get_ode_from_spline(system, np.maximum(test_data.y, 0), test_data.time)
-
-
-error_gp = Data_Def(test_data.time, abs(test_data.y - sim_data.y), system.state_dimension, system.control_dimension) 
-rmse_gp = np.sqrt(mean_squared_error(sim_data.y, test_data.y))
-std_gp = np.std(error_gp.y)
-
-print(f"GP Model RMSE: {rmse_gp}, Standard Deviation: {std_gp}")
-
-
-error_data_gp = error_gp.to_report_data()
-
-
-fig_error = plot_error(error_data_gp, header=['x1', 'x2', 'u1'], uncertainty = None)# output.variance
+        # plot_results(train_data, test_data)
+        state_figure = plot_single_states(
+                [test_data, train_data],
+                ['local LODE-GP', 'training' ],
+                header= ['$x_1$', '$x_2$', '$u_1$'], 
+                yLabel=['$x_1$ - fill level ($m$)', '$x_2$ - fill level ($m$)', '$u_1$ - flow rate ($m^3/s$) '],
+                line_styles = ['-', '.'],
+                colors = [i,5]               
+            )
 
 plt.show()
 

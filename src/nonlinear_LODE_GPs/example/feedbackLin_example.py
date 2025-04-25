@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import gpytorch
 
 # ----------------------------------------------------------------------------
-from nonlinear_LODE_GPs.helpers import get_config, load_system, Data_Def, Time_Def
+from nonlinear_LODE_GPs.helpers import get_config, load_system, Data_Def, Time_Def, save_everything
 from nonlinear_LODE_GPs.feedback_linearization import Simulation_Config, learn_system_nonlinearities, Controller
 from nonlinear_LODE_GPs.gp import Linearizing_Control_2, Linearizing_Control_4, Linearizing_Control_5, CompositeModel
 from scipy.integrate import solve_ivp
@@ -15,7 +15,7 @@ from scipy.integrate import solve_ivp
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = True
+SAVE = False
 
 system_name = "inverted_pendulum"
 
@@ -25,7 +25,7 @@ model_dir=config['model_dir']
 data_dir=config['data_dir']
 model_name = config['model_name']
 name =  '_' + model_name + "_" + system_name
-model_path = f'{model_dir}/2{name}.pth'
+model_path = f'{model_dir}/me_1{name}.pth' #umlauft_1 me_1
 
 model_config = {
     'device': device,
@@ -61,6 +61,7 @@ sim_configs = [
     Simulation_Config(sim_time, [-3 * np.pi/4 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
     
     Simulation_Config(sim_time, [np.pi , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
+    Simulation_Config(sim_time, [0 , 0 ,0], np.zeros((sim_time.count,1)), downsample, 'u=0'),
 ]
 
 
@@ -91,6 +92,8 @@ v = 0
 # Plot surface of alpha and beta
 # -----------------------------------------------------------------
 
+'''
+
 l = 100
 val = 3* torch.pi / 4
 x_min = [-val, -val]
@@ -102,15 +105,16 @@ test_points1, test_points2 = torch.meshgrid(
         )
 test_points = torch.stack([test_points1.flatten(), test_points2.flatten()], dim=-1)
 
-beta_system = torch.zeros_like(control_gp.train_targets)
-alpha_system = torch.zeros_like(control_gp.train_targets)
+beta_system = torch.zeros(control_gp.train_targets.shape[0])
+alpha_system = torch.zeros(control_gp.train_targets.shape[0])
 for i in range(control_gp.train_targets.shape[0]):
     alpha_system[i] = system.alpha(control_gp.train_inputs[0][i].numpy())
     beta_system[i] = system.beta(control_gp.train_inputs[0][i].numpy())
 
-
-test_alpha = alpha(test_points).squeeze()
-test_beta = beta(test_points, 0).squeeze()
+with gpytorch.settings.observation_nan_policy('mask'):
+    with torch.no_grad():
+        test_alpha = alpha(test_points).squeeze()
+        test_beta = beta(test_points, 0).squeeze()
 
 fig_alpha = surface_plot(
     test_points1.numpy(),
@@ -134,6 +138,7 @@ fig_beta = surface_plot(
     [r'$\hat{\beta}(\boldmath{x})$', r'${\beta(\boldmath{x})}$']
 )
 
+'''
 
 # -----------------------------------------------------------------
 # TEST CONTROLLER
@@ -145,10 +150,13 @@ test_controller = [
     controller_0
 ]
 
+ 
 
-sim_time_u = Time_Def(0, t*1, step=0.01)
+sim_time_u = Time_Def(0, t*2, step=0.01)
+rng = np.random.default_rng()
+position = (np.pi - 2* rng.random() * np.pi)
 
-x_0 = np.array([ np.pi/2, 0 ,0])
+x_0 = np.array([position , 0 ,0])
 
 y_ref_control = np.zeros((sim_time_u.count))
 ts = sim_time_u.linspace()
@@ -178,12 +186,12 @@ with gpytorch.settings.observation_nan_policy('mask'):
 
             control_data.append(Data_Def(ts.numpy(), control_y, system.state_dimension, system.control_dimension, sim_time_u))
 
-fig_results = plot_states(
-    control_data,
-    data_names = ['GP', "exact feedback", r'$u_0$'], 
-    header= [r'$x_1$', r'$x_2$', r'$u$'], yLabel=['Angle (rad)', 'Force (N)'],
-    title = f'Inverted Pendulum GP Control: a0: {a0}, a1: {a1}, v: {v}'
-    )
+# fig_results = plot_states(
+#     control_data,
+#     data_names = ['GP', "exact feedback", r'$u_0$'], 
+#     header= [r'$x_1$', r'$x_2$', r'$u$'], yLabel=['Angle (rad)', 'Force (N)'],
+#     title = f'Inverted Pendulum GP Control: a0: {a0}, a1: {a1}, v: {v}'
+#     )
 
 
 figure = plot_single_states(
@@ -209,8 +217,21 @@ plt.show()
 
 
 if SAVE:
-    save_plot_to_pdf(fig_alpha, f'alpha_feedbackLin2')
-    save_plot_to_pdf(fig_beta, f'beta_feedbackLin2')
-    save_plot_to_pdf(fig_results, f'results_plot_feedbackLin2')
-    save_plot_to_pdf(trajectory_plot, f'trajectory_plot_feedbackLin2')
-    save_plot_to_pdf(figure, f'states_plot_feedbackLin2')
+    save_plot_to_pdf(fig_alpha, f'alpha_feedbackLin_{SIM_ID}')
+    save_plot_to_pdf(fig_beta, f'beta_feedbackLin_{SIM_ID}')    
+    save_plot_to_pdf(fig_results, f'results_plot_feedbackLin_{SIM_ID}')
+    save_plot_to_pdf(trajectory_plot, f'trajectory_plot_feedbackLin_{SIM_ID}')
+    save_plot_to_pdf(figure, f'states_plot_feedbackLin_{SIM_ID}')
+    config['model_id'] = MODEL_ID
+    config['simulation_id'] = SIM_ID
+    save_everything(
+        system_name, 
+        model_path, 
+        config, 
+        control_data[0], 
+        control_data[1], 
+        sim_data=control_data[2], 
+        init_state=x_0, 
+        system_param=np.array([a0, a1, v]), 
+        model_dict=control_gp.state_dict()
+    )

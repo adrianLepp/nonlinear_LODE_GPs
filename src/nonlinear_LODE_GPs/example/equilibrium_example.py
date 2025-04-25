@@ -16,7 +16,7 @@ from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = False
+SAVE = True
 
 
 system_name = "nonlinear_watertank"
@@ -26,14 +26,16 @@ SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
 
 t  = 100
 optim_steps = 300
-downsample = 100 # TODO  100 50 10
+downsample = 20 # TODO  100 50 10
 sim_time = Time_Def(0, t, step=0.1)
-train_time = Time_Def(0, t, step=sim_time.step*downsample)
+# train_time = Time_Def(0, t, step=sim_time.step*downsample)
 test_time = Time_Def(0, t-0, step=0.1)
 
-u_e_rel = 0.3
+noise = torch.tensor([1e-5, 1e-5, 1e-7])
 
-u_rel = 1
+u_e_rel = 0.2
+
+u_rel = .3
 
 
 system = load_system(system_name)
@@ -55,13 +57,16 @@ states = State_Description(equilibrium=torch.tensor(equilibrium), init=torch.ten
 u = np.ones((sim_time.count,1)) * u_rel * system.param.u
 
 _train_x, _train_y= simulate_system(system, x_0[0:system.state_dimension], sim_time, u)
-train_x, train_y = downsample_data(_train_x, _train_y, downsample)
+sim_data = Data_Def(_train_x, _train_y,system.state_dimension, system.control_dimension, sim_time)
+train_data = sim_data.downsample(downsample).add_noise(noise)
+# train_x, train_y = downsample_data(_train_x, _train_y, downsample)
 
 # %% train
 
 
 with gpytorch.settings.observation_nan_policy('mask'):
     # train_y[1:-1,0:2] = torch.tensor(np.nan)
+    # train_data.y[1:-1,0:2] = torch.nan
 
     #train_y[:,2] = torch.tensor(np.nan)
 
@@ -70,24 +75,26 @@ with gpytorch.settings.observation_nan_policy('mask'):
         # rank=num_tasks, 
         #noise_constraint=gpytorch.constraints.Positive(), 
         has_global_noise=False, 
-        has_task_noise=True,
+        # has_task_noise=True,
         noise_constraint=gpytorch.constraints.GreaterThan(torch.tensor(1e-15))
     )
+    # likelihood.task_noises = torch.tensor(noise, requires_grad=False)
 
     # noise=1e-8
     #init_noise = [1e-3, 1e-3, 1e-6]
     #task_noise = torch.diag(torch.tensor(init_noise, requires_grad=False))
     # covar_factor = torch.eye(num_tasks, requires_grad=False)
     
-    #likelihood.initialize(task_noises=torch.tensor(init_noise, requires_grad=False))
-    
+    # likelihood.initialize(task_noises=torch.tensor(noise, requires_grad=False))
+    # likelihood.raw_task_noises.requires_grad = False
+
     # likelihood.task_noise_covar_factor.requires_grad = False
 
     #likelihood.task_noises= likelihood.task_noises.detach()
     #likelihood.raw_task_noises.requires_grad = False
 
     mean_module = Equilibrium_Mean(equilibrium, num_tasks)
-    model = LODEGP(train_x, train_y, likelihood, num_tasks, system_matrix, mean_module) #system.state_var, system.control_var
+    model = LODEGP(train_data.time, train_data.y, likelihood, num_tasks, system_matrix, mean_module) #system.state_var, system.control_var
 
     training_loss = optimize_gp(model,optim_steps)
 
@@ -118,7 +125,7 @@ _, _ = get_ode_from_spline(system, ref_data.y, ref_data.time)
 
 
 test_data = Data_Def(test_x.numpy(), output.mean.numpy(), system.state_dimension, system.control_dimension, test_time, uncertainty)
-train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension, train_time)
+# train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension, train_time)
 
 
 error_gp = Data_Def(test_data.time, abs(test_data.y - _train_y.numpy()), system.state_dimension, system.control_dimension) 

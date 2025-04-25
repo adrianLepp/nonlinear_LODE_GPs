@@ -16,7 +16,7 @@ from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = True
+SAVE = False
 
 
 system_name = "nonlinear_watertank"
@@ -69,8 +69,8 @@ with gpytorch.settings.observation_nan_policy('mask'):
         num_tasks, 
         # rank=num_tasks, 
         #noise_constraint=gpytorch.constraints.Positive(), 
-        has_global_noise=False, 
-        has_task_noise=True,
+        # has_global_noise=False, 
+        # has_task_noise=True,
         noise_constraint=gpytorch.constraints.GreaterThan(torch.tensor(1e-15))
     )
 
@@ -137,7 +137,7 @@ rmse_gp = np.sqrt(mean_squared_error(_train_y.numpy(), test_data.y))
 std_gp = np.std(error_gp.y)
 
 # Calculate RMSE for DE model
-rmse_de = np.sqrt(mean_squared_error(_train_y.numpy(), ref_data.y))
+rmse_de = mean_squared_error(_train_y.numpy(), ref_data.y)
 std_de = np.std(error_de.y)
 
 print(f"GP Model RMSE: {rmse_gp}, Standard Deviation: {std_gp}")
@@ -163,7 +163,7 @@ loss_tracker = LossTracker(loss_file)
 
 # loss_tracker.add_loss(f'D = {train_time.count}', training_loss)
 fig_loss = loss_tracker.plot_losses()
-loss_tracker.to_csv()
+# loss_tracker.to_csv()
 fig_error = plot_error(error_data_gp, error_data_de, ['x1', 'x2', 'u1'])
 fig_results = plot_states([test_data, ref_data, train_data])
 plt.show()

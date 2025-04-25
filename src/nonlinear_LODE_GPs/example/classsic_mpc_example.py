@@ -15,14 +15,27 @@ from result_reporter.latex_exporter import create_mpc_plot, save_plot_to_pdf
 import do_mpc
 
 
+def mse_mean(mean, ref, indx=None):
+        if indx is None:
+            return torch.mean(torch.square(mean - ref))
+        else:
+            return torch.mean(torch.square((mean - ref)[indx]))
+
+def constr_viol(mean, ub, lb, indx=None):
+    if indx is None:
+        return torch.mean(torch.relu(mean - ub) + torch.relu(lb - mean))
+    else:
+        return torch.mean(torch.relu((mean - ub)[indx]) + torch.relu((lb - mean)[indx]))
+
+
 
 x_ref=[1.8807e-01, 1.1468e-01]
 u_ref = 3e-5
 
 x0 = np.array([0.08358817533129459, 0.05096839959225279]).reshape(-1,1) #2e-5
 
-dt = 0.1
-sim_length = 200
+dt = 1
+sim_length = 400
 
 model_type = 'continuous' # either 'discrete' or 'continuous'
 model = do_mpc.model.Model(model_type)
@@ -65,7 +78,7 @@ model.setup()
 mpc = do_mpc.controller.MPC(model)
 
 setup_mpc = {
-    'n_horizon': 100,
+    'n_horizon': 10,
     't_step': dt,
     'n_robust': 0,
     'store_full_solution': True,
@@ -158,11 +171,21 @@ ax[1].set_xlabel('time [s]')
 
 u0 = np.zeros((1,1))
 
+rise_time = None
+settling_time = None
+
 u_data = [u0]
 x_data = [x0]
 for i in range(int(sim_length / dt)):
-    if np.isclose(x0, x_ref, rtol=1e-2).all():
-        u0= u_ref
+    if np.isclose(x0[0], x_ref[0], atol=5e-3) and rise_time is None:
+        print(f"rise time: {i * dt}")
+        rise_time = i * dt
+        
+    
+    if np.isclose(x0[:,0], x_ref, atol=5e-3).all() and settling_time is None:
+        # u0= u_ref
+        settling_time = i * dt
+        print(f"Settling time: {settling_time}")
     else:
         u0 = mpc.make_step(x0)
 
@@ -178,12 +201,23 @@ full_data = np.stack((x_np[:,0,:], x_np[:,1,:], u_np[:,0,:])).squeeze()
 time = np.linspace(0,sim_length,int(sim_length / dt) + 1)
 
 test_data = Data_Def(time, full_data, 2, 1)
-# reference_data = {
-#     'time': np.array([0, sim_length]),
-#     'f1': np.array([x_ref[0], x_ref[0]]),
-#     'f2': np.array([x_ref[1], x_ref[1]]),
-#     'f3': np.array([u_ref, u_ref]),
-# }
+
+peak_value = np.max(test_data.y)
+peak_time = test_data.time[np.argmax(test_data.y[0,:])]   
+
+
+control_err = mse_mean(
+    torch.tensor(test_data.y[0:2,:]),
+    torch.tile(torch.tensor(x_ref), (test_data.y.shape[1], 1)).t()
+    #torch.zeros_like(torch.tensor(lode_data))
+)
+
+control_mean =  np.mean(test_data.y[2,:])
+
+print(f"mean Control: {control_mean}")
+print(f"Control error: {control_err}")
+
+
 
 reference_data = {
     'time': test_data.time,
@@ -198,7 +232,7 @@ fig = create_mpc_plot(None, None, ['x1','x2', 'u'], 'Time ($\mathrm{s})$', 'Wate
 
 plt.show()
 
-save_plot_to_pdf(fig, f'mpc_plot_classic_1')
+# save_plot_to_pdf(fig, f'mpc_plot_classic_3')
 
 
 sim_graphics.plot_results()

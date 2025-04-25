@@ -75,7 +75,8 @@ class Data_Def():
     def downsample(self,factor=10):
         t_redux = self.time.clone()[::factor]
         y_redux = self.y.clone()[::factor,:]
-        return Data_Def(t_redux, y_redux, self.state_dim, self.control_dim, self.time_def, self.uncertainty, self.y_names)
+        time_def = Time_Def(t_redux[0], t_redux[-1], step=self.time_def.step*factor)
+        return Data_Def(t_redux, y_redux, self.state_dim, self.control_dim, time_def, self.uncertainty, self.y_names)
     
     def add_noise(self, noise:torch.Tensor):
         if isinstance(self.y, torch.Tensor):
@@ -175,10 +176,13 @@ def create_test_inputs(test_time:Time_Def, derivatives:int):
     test_x = torch.cat(data_list).sort()[0]
     return test_x
 
-def get_ode_from_spline(system:ODE_System, estimate:torch.Tensor, test_x:torch.Tensor):
+def get_ode_from_spline(system:ODE_System, estimate:torch.Tensor, test_x:torch.Tensor, verbose=False):
     fkt = list()
     for i in range(system.dimension):
-        # output_channel = estimate[:, dimension]
+       
+        # negative_indices = np.where(estimate[:, i] < 0)
+        # if negative_indices[0].size > 0:
+            # print(f'Negative values found at indices {negative_indices[0]} with values {estimate[negative_indices, i]}')
         fkt.append(spline([(t, y) for t, y in zip(test_x, estimate[:, i])]))
 
     ode = system.get_ODEfrom_spline(fkt)
@@ -188,10 +192,10 @@ def get_ode_from_spline(system:ODE_System, estimate:torch.Tensor, test_x:torch.T
         for i in range(system.state_dimension):
             #ode_error_list[i].append(np.abs(globals()[f"ode{i+1}"](val)))
             ode_error_list[i].append(np.abs(ode[i](val)))
-
-    print('------------------------------------------')
-    print('ODE error', np.mean(ode_error_list, axis=1))
-    print('------------------------------------------')
+    if verbose:
+        print('------------------------------------------')
+        print('ODE error', np.mean(ode_error_list, axis=1))
+        print('------------------------------------------')
     return ode, ode_error_list
 
 def calc_finite_differences(sample, point_step_size, skip=False, number_of_samples=0):
