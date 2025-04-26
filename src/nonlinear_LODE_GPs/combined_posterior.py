@@ -138,7 +138,7 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             weight_loss = ((weight_sums - 1) ** 2)
             
             weight_loss_max = weight_loss.max()
-            weight_loss_mean = weight_loss.max()
+            weight_loss_mean = weight_loss.mean()
 
             total_loss = weight_loss_mean# + loss
             total_loss.backward()
@@ -149,15 +149,23 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
 
             training_loss.append(total_loss.item())
 
-        print("\n----------------------------------------------------------------------------------\n")
-        print('Trained model parameters:')
         named_parameters = list(self.named_parameters())
         param_conversion = torch.nn.Softplus()
-
+        parameters = {}
         for j in range(len(named_parameters)):
-            print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
-            # print(named_parameters[j][0], (named_parameters[j][1].data)) #.item()
-        print("\n----------------------------------------------------------------------------------\n")
+            parameters[named_parameters[j][0]] = param_conversion(named_parameters[j][1].data).tolist()
+            # print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+        if verbose is True:
+            print("\n----------------------------------------------------------------------------------\n")
+            print('Trained model parameters:')
+            for j in range(len(named_parameters)):
+                    print(named_parameters[j][0], param_conversion(named_parameters[j][1].data)) #.item()
+                # print(named_parameters[j][0], (named_parameters[j][1].data)) #.item()
+            print("\n----------------------------------------------------------------------------------\n")
+
+        return training_loss, parameters
+
+        
 
     def eval(self):
         for model in self.models:

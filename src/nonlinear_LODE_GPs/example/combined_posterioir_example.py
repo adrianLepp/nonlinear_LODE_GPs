@@ -82,7 +82,7 @@ _train_x, _train_y= simulate_system(system, x0, sim_time, u)
 
 sim_data = Data_Def(_train_x, _train_y, system.state_dimension, system.control_dimension,train_time)
 noise = torch.tensor([1e-5, 1e-5, 1e-7])
-noise = torch.tensor([0, 0, 0])
+# noise = torch.tensor([0, 0, 0])
 train_data = sim_data.downsample(downsample).add_noise(noise)
 
 # train_data = Data_Def(train_x.numpy(), train_y.numpy(), system.state_dimension, system.control_dimension,train_time)
@@ -97,7 +97,7 @@ model = CombinedPosterior_ELODEGP(
     equilibriums, 
     centers,
     Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
-    weight_lengthscale=torch.tensor([100]),
+    weight_lengthscale=torch.tensor([10]),
     shared_weightscale=False,
     # additive_se=True,
     clustering=True,
