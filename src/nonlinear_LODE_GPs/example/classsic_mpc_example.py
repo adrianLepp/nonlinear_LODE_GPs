@@ -7,6 +7,8 @@ import os
 rel_do_mpc_path = os.path.join('..','..')
 sys.path.append(rel_do_mpc_path)
 
+from datetime import datetime
+
 from nonlinear_LODE_GPs.systems.nonlinear_watertank import Parameter
 from nonlinear_LODE_GPs.helpers import *
 from result_reporter.latex_exporter import create_mpc_plot, save_plot_to_pdf
@@ -176,6 +178,8 @@ settling_time = None
 
 u_data = [u0]
 x_data = [x0]
+calc_time = []
+
 for i in range(int(sim_length / dt)):
     if np.isclose(x0[0], x_ref[0], atol=5e-3) and rise_time is None:
         print(f"rise time: {i * dt}")
@@ -187,13 +191,18 @@ for i in range(int(sim_length / dt)):
         settling_time = i * dt
         print(f"Settling time: {settling_time}")
     else:
+        start = datetime.now()
         u0 = mpc.make_step(x0)
+        calc_time.append((datetime.now() - start).microseconds)
 
     xu0 = simulator.make_step(u0)
     x0 =xu0[0:2]
     u_data.append(u0)
     x_data.append(x0)
 
+
+print(np.mean(calc_time))
+print(np.std(calc_time))
 
 u_np = np.array(u_data)
 x_np = np.array(x_data)

@@ -9,6 +9,7 @@ from sage.calculus.var import var
 from nonlinear_LODE_GPs.kernels import *
 import torch
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.lodegp import LODEGP, optimize_gp
@@ -192,9 +193,14 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
     x_ref = np.array([states.init, states.target])
     t_ref = np.array([0, control_time.end])
 
+    calc_time = []
+
     # control loop
     for i in range(control_time.count - 1):
         # init time
+        start = datetime.now()
+        
+
         t_i = i * control_time.step
         x_i = x_sim[i*step_count]
         ref_time = Time_Def(t_i, control_time.end, step=control_time.step)#* dt_step TODO: dt_step
@@ -222,9 +228,12 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
 
         # simulate system
         u_sim[start_idx:end_idx] = u_ref[1::]
+        
         sol = solve_ivp(system.stateTransition, [step_time.start, step_time.end], x_i[0:system.state_dimension], method='RK45', t_eval=t_reference.numpy(), args=(u_sim, step_time.step ), max_step=step_time.step)#, max_step=dt ,  atol = 1, rtol = 1
         x_sim_current = np.concatenate([sol.y.transpose()[1::], u_ref[1::]], axis=1)
         x_sim[start_idx:end_idx] = x_sim_current
+
+        calc_time.append((datetime.now() - start).microseconds)
 
         if plot_single_steps and t_i > 1000:
             t_reference_2 = torch.linspace(step_time.start, control_time.end, control_time.count +1)
@@ -257,7 +266,7 @@ def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, ref
     lode_data = Data_Def(t_gp, x_lode, system.state_dimension, system.control_dimension)
     train_data = Data_Def(t_ref, x_ref, system.state_dimension, system.control_dimension)
 
-    return sim_data, train_data, lode_data, settling_time
+    return sim_data, train_data, lode_data, settling_time, sum( calc_time)
 
 def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_Description, x_0=None, t_past:torch.Tensor=None, past:torch.Tensor=None):
     a = 1

@@ -16,7 +16,7 @@ from nonlinear_LODE_GPs.lodegp import LODEGP, optimize_gp
 from nonlinear_LODE_GPs.mean_modules import Equilibrium_Mean
 
 
-PLOT = True
+PLOT = False
 
 
 def mse_mean(mean, ref, indx=None):
@@ -59,7 +59,7 @@ def mpc_loop(system, u_1, u_2, reference_strategie, control_time, sim_time, opti
         training_loss, hyperparam = optimize_gp(model, training_iterations=optim_steps, verbose=False)
 
         # model, mask = pretrain(system_matrix, num_tasks, control_time, pretrain_steps, reference_strategie, states, hyperparameters)# pretrain the system and generate gp model. eventually not necessary
-        sim_data, ref_data, lode_data, settling_time = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, 0)#, plot_single_steps=True
+        sim_data, ref_data, lode_data, settling_time, calc_time = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, 0)#, plot_single_steps=True
 
         constraint_viol = constr_viol(
             torch.tensor(sim_data.y), 
@@ -116,6 +116,7 @@ def mpc_loop(system, u_1, u_2, reference_strategie, control_time, sim_time, opti
             'peak_value': peak_value,
             'peak_time': peak_time,
             "p_o_ratio": p_o_ratio,
+            'calc_time': calc_time,
         }, {
             'lengthscale': hyperparam['covar_module.model_parameters.lengthscale_2'],
             'signal_variance': hyperparam['covar_module.model_parameters.signal_variance_2'],
@@ -125,7 +126,7 @@ def mpc_loop(system, u_1, u_2, reference_strategie, control_time, sim_time, opti
 
 def main():
     table_file = '../data/tables/mpc_test_table_200'
-    random_repeats = 1
+    random_repeats = 10
     u_e_variants =  [0.2] #[0.1, 0.2, 0.3, 0.4] # [0.1, 0.2, 0.3, 0.4] #[0.2] # 
     seed_variants = range(random_repeats)
 
@@ -145,10 +146,10 @@ def main():
         'init_noise' : init_noise,
         'target_noise' : target_noise,
         'soft_constraints' : 'state_limit',
-        'time' : 1000,
+        'time' : 200,
         'name' : 'prior'
     },
-    #{
+    # {
     #     'target': False,
     #     'constraints' : 10,
     #     'past-values' : 0,
