@@ -18,9 +18,9 @@ torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
 
-local_predictions = False
+local_predictions = True
 SAVE = False
-output_weights=False
+output_weights=True
 system_name = "nonlinear_watertank"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
@@ -96,8 +96,8 @@ model = CombinedPosterior_ELODEGP(
     system_matrices, 
     equilibriums, 
     centers,
-    Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
-    weight_lengthscale=torch.tensor([10]),
+    Mahalanobis_Distance, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
+    # weight_lengthscale=torch.tensor([10]),
     shared_weightscale=False,
     # additive_se=True,
     clustering=True,

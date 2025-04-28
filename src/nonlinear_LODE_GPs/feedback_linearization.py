@@ -94,7 +94,7 @@ def get_linearizing_feedback(gp:LODEGP, sim_configs:List[Simulation_Config], sys
         gp.set_train_data(train_x, train_y, strict=False)
 
         with gpytorch.settings.observation_nan_policy('mask'):
-            optimize_gp(gp, optim_steps)
+            optimize_gp(gp, optim_steps, verbose=False)
 
             gp.eval()
             gp.likelihood.eval()
@@ -154,7 +154,7 @@ def get_feedback_controller(
         control_gp.load_state_dict(torch.load(model_config['model_path'], map_location=model_config['device']))
     else:
         with gpytorch.settings.observation_nan_policy('mask'):
-            control_gp.optimize(optim_steps * 3, verbose=True)
+            control_gp.optimize(optim_steps * 3, verbose=False)
 
     if model_config['save']:
                 torch.save(control_gp.state_dict(), model_config['model_path'])

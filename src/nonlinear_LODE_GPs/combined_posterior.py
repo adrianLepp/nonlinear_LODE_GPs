@@ -140,7 +140,7 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             weight_loss_max = weight_loss.max()
             weight_loss_mean = weight_loss.mean()
 
-            total_loss = weight_loss_mean# + loss
+            total_loss = weight_loss_max# + loss
             total_loss.backward()
 
             if verbose is True:

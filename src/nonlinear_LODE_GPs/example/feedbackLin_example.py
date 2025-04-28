@@ -92,7 +92,7 @@ v = 0
 # Plot surface of alpha and beta
 # -----------------------------------------------------------------
 
-'''
+
 
 l = 100
 val = 3* torch.pi / 4
@@ -138,7 +138,7 @@ fig_beta = surface_plot(
     [r'$\hat{\beta}(\boldmath{x})$', r'${\beta(\boldmath{x})}$']
 )
 
-'''
+
 
 # -----------------------------------------------------------------
 # TEST CONTROLLER
