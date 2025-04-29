@@ -142,7 +142,10 @@ def control_metric_table(control_metric, table_name):
             for key in control_metric.keys():
                 row =  [key]
                 for metric in metric_names:
-                    row.append(f"{control_metric[key][metric]['mean']:.4f} \pm {control_metric[key][metric]['std']:.4f}")
+                    if metric in control_metric[key]:
+                        row.append(f"{control_metric[key][metric]['mean']:.4f} \pm {control_metric[key][metric]['std']:.4f}")
+                    else:
+                        row.append('-')
                 table.add_row(row)
             table.add_hline()
 
@@ -157,60 +160,80 @@ def test_standard_controller():
 
     system = load_system(system_name, a0=0, a1=0, v=1)
 
-    controll_param_variations = [
-        # {
-        # 'a0': 10,
-        # 'a1': 15,
-        # 'v': 0,
-        # },
-        # {
-        # 'a0': 20,
-        # 'a1': 25,
-        # 'v': 0,
-        # },
-        {
-        'a0': 3,
-        'a1': 4,
-        'v': 0,
-        },
-    
-    ]
+    a0 = 1
+    a1 = 2
+    v = 0
 
-
+    # Controllers = [CompositeModel, Linearizing_Control_5, ]
     random_repeats = 20
     seed_variants = range(random_repeats)
 
+    exact_controller = Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]), alpha=system.alpha, beta=system.beta)
+    controller_0 = Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]))
 
-
+    control_metric = {
+    }
     
+    control_metrics = {
+                'settling_time': [],
+                'steady_state_error': [],
+                'peak': [],
+                'peakTime': [],
+                'energy': [],
+                'rmse_alpha': [],
+                'rmse_beta': [],
+    }
+    control_metrics0 = control_metrics.copy()
 
     for seed in seed_variants:
-        for controll_param in controll_param_variations:
-            a0 = controll_param['a0']
-            a1 = controll_param['a1']
-            v = controll_param['v']
-            exact_controller = Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]), alpha=system.alpha, beta=system.beta)
-            controller_0 = Controller(system.state_dimension, system.control_dimension, a=np.array([a0, a1]), v=np.array([v]))
-            np.random.seed(seed)
-            rng = np.random.default_rng(seed)
-            position = (np.pi - 2* rng.random() * np.pi)
-            exact_data = test_controller(exact_controller, system, test_time, position)
-            prior_data = test_controller(controller_0, system, test_time, position)
+        np.random.seed(seed)
+        rng = np.random.default_rng(seed)
+        torch.manual_seed(seed)
+    
+        
+        position = (np.pi - 2* rng.random() * np.pi)
+        exact_data = test_controller(exact_controller, system, test_time, position)
+        prior_data = test_controller(controller_0, system, test_time, position)
 
-            if PLOT:
-                settling_time , por, offset, peakTime = analyze_data(prior_data)
-                print(f"Settling time: {settling_time:.2f}, Peak time: {peakTime:.2f}, Overshoot ratio: {por:.2f}, Offset: {offset:.2f}")
-                figure = plot_single_states(
-                    [exact_data, prior_data],
-                    ["exact feedback", r'$u_0$'],
-                    header= [r'$x_1$', r'$x_2$', r'$u$'], 
-                    yLabel=['angle (rad)', 'angular velocity (rad/s) ', 'force (N) '],
-                )
+        settling_time , steady_state_error, peak, peakTime, energy = analyze_data(exact_data)
 
+        control_metrics['settling_time'].append(settling_time)
+        control_metrics['steady_state_error'].append(steady_state_error)
+        control_metrics['peak'].append(peak)
+        control_metrics['peakTime'].append(peakTime)
+        control_metrics['energy'].append(energy)
 
-                trajectory_plot = plot_trajectory([exact_data, prior_data], {}, ax_labels=['angle (rad)', 'angular velocity (rad/s)'], labels = [ "exact feedback", r'$u_0$'])
+        settling_time , steady_state_error, peak, peakTime, energy = analyze_data(prior_data)
 
-                plt.show()
+        control_metrics0['settling_time'].append(settling_time)
+        control_metrics0['steady_state_error'].append(steady_state_error)
+        control_metrics0['peak'].append(peak)
+        control_metrics0['peakTime'].append(peakTime)
+        control_metrics0['energy'].append(energy)
+
+        
+
+        # print(f"Settling time: {settling_time:.2f}, Peak time: {peakTime:.2f}, Overshoot ratio: {por:.2f}, Offset: {offset:.2f}")
+
+        if PLOT:
+            figure = plot_single_states(
+                [exact_data, prior_data],
+                ["exact feedback", r'$u_0$'],
+                header= [r'$x_1$', r'$x_2$', r'$u$'], 
+                yLabel=['angle (rad)', 'angular velocity (rad/s) ', 'force (N) '],
+            )
+
+            trajectory_plot = plot_trajectory([exact_data, prior_data], {}, ax_labels=['angle (rad)', 'angular velocity (rad/s)'], labels = ["exact feedback", r'$u_0$'])
+
+            plt.show()
+            
+    avg_metrics = {key: {'mean': np.mean(value), 'std': np.std(value)} for key, value in control_metrics.items()}
+    avg_metrics0 = {key: {'mean': np.mean(value), 'std': np.std(value)} for key, value in control_metrics0.items()}
+
+    control_metric['exact'] = avg_metrics
+    control_metric['linear'] = avg_metrics0
+
+    control_metric_table(control_metric, '../data/tables/control_metrics_standard')
                 
 
 def get_gp_param(model):
@@ -373,4 +396,5 @@ def main():
             
 
     
-main()
+# main()
+test_standard_controller()

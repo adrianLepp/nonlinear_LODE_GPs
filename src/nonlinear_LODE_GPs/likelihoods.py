@@ -1,7 +1,7 @@
 from gpytorch.likelihoods.multitask_gaussian_likelihood import _MultitaskGaussianLikelihoodBase, MultitaskGaussianLikelihood
 from gpytorch.likelihoods.noise_models import FixedGaussianNoise
 # from gpytorch.lazy import ConstantDiagLazyTensor, KroneckerProductLazyTensor, DiagLazyTensor
-from linear_operator import ConstantDiagLinearOperator, KroneckerProductLinearOperator, DiagLinearOperator
+from linear_operator.operators import ConstantDiagLinearOperator, KroneckerProductLinearOperator, DiagLinearOperator
 # from linear_operator.operators import DiagLinearOperator, ConstantDiagLinearOperator, KroneckerProductLinearOperator
 #from gpytorch.operators import ConstantDiagLinearOperator
 import torch
