@@ -1,8 +1,8 @@
 from gpytorch.likelihoods.multitask_gaussian_likelihood import _MultitaskGaussianLikelihoodBase, MultitaskGaussianLikelihood
 from gpytorch.likelihoods.noise_models import FixedGaussianNoise
-from gpytorch.lazy import ConstantDiagLazyTensor, KroneckerProductLazyTensor, DiagLazyTensor
-from linear_operator import LinearOperator, operators
-from linear_operator.operators import DiagLinearOperator, ConstantDiagLinearOperator, KroneckerProductLinearOperator
+# from gpytorch.lazy import ConstantDiagLazyTensor, KroneckerProductLazyTensor, DiagLazyTensor
+from linear_operator import ConstantDiagLinearOperator, KroneckerProductLinearOperator, DiagLinearOperator
+# from linear_operator.operators import DiagLinearOperator, ConstantDiagLinearOperator, KroneckerProductLinearOperator
 #from gpytorch.operators import ConstantDiagLinearOperator
 import torch
 import gpytorch
@@ -83,13 +83,13 @@ class _FixedTaskNoiseMultitaskLikelihood(_MultitaskGaussianLikelihoodBase):
             data_noise = self.noise_covar(*params, shape=torch.Size((shape[-2],)), **kwargs)
             eye = torch.ones(1, device=data_noise.device, dtype=data_noise.dtype)
             # TODO: add in a shape for batched models
-            task_noise = ConstantDiagLazyTensor(
+            task_noise = ConstantDiagLinearOperator(
                 eye, diag_shape=torch.Size((self.num_tasks,))
             )
             # eye2 = torch.ones(torch.Size((self.num_tasks,)), device=data_noise.device, dtype=data_noise.dtype)
-            # task_noise = DiagLazyTensor(eye2)
+            # task_noise = DiagLinearOperator(eye2)
             
-            return KroneckerProductLazyTensor(data_noise, task_noise)
+            return KroneckerProductLinearOperator(data_noise, task_noise)
         else:
             # TODO: copy over pieces from MultitaskGaussianLikelihood
             raise NotImplementedError("Task noises not supported yet.")
@@ -111,18 +111,18 @@ class _FixedTaskNoiseMultitaskLikelihood(_MultitaskGaussianLikelihoodBase):
             data_noise = self.noise_covar(*params, shape=torch.Size((shape[-2],)), **kwargs)
             eye = torch.ones(1, device=data_noise.device, dtype=data_noise.dtype)
             # TODO: add in a shape for batched models
-            # task_noise = ConstantDiagLazyTensor(
+            # task_noise = ConstantDiagLinearOperator(
             #     eye, diag_shape=torch.Size((self.num_tasks,))
             # )
             eye2 = torch.ones(torch.Size((self.num_tasks,)), device=data_noise.device, dtype=data_noise.dtype)
-            task_noise = DiagLazyTensor(eye2)
+            task_noise = DiagLinearOperator(eye2)
             
-            return KroneckerProductLazyTensor(data_noise, task_noise)
+            return KroneckerProductLinearOperator(data_noise, task_noise)
         else:
             data_noise = self.noise_covar(*params, shape=torch.Size((shape[-2],)), **kwargs)
             eye = torch.tensor(self.task_noise, device=data_noise.device, dtype=data_noise.dtype)
-            task_noise = DiagLazyTensor(eye)
-            return KroneckerProductLazyTensor(data_noise, task_noise)
+            task_noise = DiagLinearOperator(eye)
+            return KroneckerProductLinearOperator(data_noise, task_noise)
 
 
             # TODO: copy over pieces from MultitaskGaussianLikelihood
