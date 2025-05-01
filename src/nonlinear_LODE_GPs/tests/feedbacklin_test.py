@@ -174,7 +174,7 @@ def test_standard_controller():
     control_metric = {
     }
     
-    control_metrics = {
+    control_metrics = [{
                 'settling_time': [],
                 'steady_state_error': [],
                 'peak': [],
@@ -182,8 +182,19 @@ def test_standard_controller():
                 'energy': [],
                 'rmse_alpha': [],
                 'rmse_beta': [],
-    }
-    control_metrics0 = control_metrics.copy()
+    },
+    {
+                'settling_time': [],
+                'steady_state_error': [],
+                'peak': [],
+                'peakTime': [],
+                'energy': [],
+                'rmse_alpha': [],
+                'rmse_beta': [],
+    },
+    ]
+    # control_metrics.append(control_metrics[0].copy())
+    # control_metrics0 = control_metrics.copy()
 
     for seed in seed_variants:
         np.random.seed(seed)
@@ -192,44 +203,36 @@ def test_standard_controller():
     
         
         position = (np.pi - 2* rng.random() * np.pi)
-        exact_data = test_controller(exact_controller, system, test_time, position)
-        prior_data = test_controller(controller_0, system, test_time, position)
+        for i, controller in enumerate( [exact_controller, controller_0]):
+            control_data = test_controller(controller, system, test_time, position)
+            # exact_data = test_controller(exact_controller, system, test_time, position)
+            # prior_data = test_controller(controller_0, system, test_time, position)
 
-        settling_time , steady_state_error, peak, peakTime, energy = analyze_data(exact_data)
+            settling_time , steady_state_error, peak, peakTime, energy = analyze_data(control_data)
 
-        control_metrics['settling_time'].append(settling_time)
-        control_metrics['steady_state_error'].append(steady_state_error)
-        control_metrics['peak'].append(peak)
-        control_metrics['peakTime'].append(peakTime)
-        control_metrics['energy'].append(energy)
-
-        settling_time , steady_state_error, peak, peakTime, energy = analyze_data(prior_data)
-
-        control_metrics0['settling_time'].append(settling_time)
-        control_metrics0['steady_state_error'].append(steady_state_error)
-        control_metrics0['peak'].append(peak)
-        control_metrics0['peakTime'].append(peakTime)
-        control_metrics0['energy'].append(energy)
-
-        
+            control_metrics[i]['settling_time'].append(settling_time)
+            control_metrics[i]['steady_state_error'].append(steady_state_error)
+            control_metrics[i]['peak'].append(peak)
+            control_metrics[i]['peakTime'].append(peakTime)
+            control_metrics[i]['energy'].append(energy)
 
         # print(f"Settling time: {settling_time:.2f}, Peak time: {peakTime:.2f}, Overshoot ratio: {por:.2f}, Offset: {offset:.2f}")
 
-        if PLOT:
-            figure = plot_single_states(
-                [exact_data, prior_data],
-                ["exact feedback", r'$u_0$'],
-                header= [r'$x_1$', r'$x_2$', r'$u$'], 
-                yLabel=['angle (rad)', 'angular velocity (rad/s) ', 'force (N) '],
-            )
+        # if PLOT:
+        #     figure = plot_single_states(
+        #         [exact_data, prior_data],
+        #         ["exact feedback", r'$u_0$'],
+        #         header= [r'$x_1$', r'$x_2$', r'$u$'], 
+        #         yLabel=['angle (rad)', 'angular velocity (rad/s) ', 'force (N) '],
+        #     )
 
-            trajectory_plot = plot_trajectory([exact_data, prior_data], {}, ax_labels=['angle (rad)', 'angular velocity (rad/s)'], labels = ["exact feedback", r'$u_0$'])
+        #     trajectory_plot = plot_trajectory([exact_data, prior_data], {}, ax_labels=['angle (rad)', 'angular velocity (rad/s)'], labels = ["exact feedback", r'$u_0$'])
 
-            plt.show()
+        #     plt.show()
             
-    avg_metrics = {key: {'mean': np.mean(value), 'std': np.std(value)} for key, value in control_metrics.items()}
-    avg_metrics0 = {key: {'mean': np.mean(value), 'std': np.std(value)} for key, value in control_metrics0.items()}
+    avg_metrics = {key: {'mean': np.mean(value), 'std': np.std(value)} for key, value in control_metrics[0].items()}
 
+    avg_metrics0 = {key: {'mean': np.mean(value), 'std': np.std(value)} for key, value in control_metrics[1].items()}
     control_metric['exact'] = avg_metrics
     control_metric['linear'] = avg_metrics0
 

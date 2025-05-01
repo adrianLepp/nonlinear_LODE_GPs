@@ -18,7 +18,7 @@ from result_reporter.latex_exporter import save_plot_to_pdf, create_mpc_plot
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = False
+SAVE = True
 CONFIG_FILE = 'config.json'
 
 system_name = "nonlinear_watertank"
@@ -29,7 +29,7 @@ system_name = "nonlinear_watertank"
 
 
 
-def run_sim(lengthscale, signal_variance):
+def run_sim(lengthscale=None, signal_variance=None):
     print("\n----------------------------------------------------------------------------------\n")
     try:
         with open(CONFIG_FILE,"r") as f:
@@ -67,7 +67,7 @@ def run_sim(lengthscale, signal_variance):
 
     # Reference
     reference_strategie = {
-        'target': False,
+        'target': True,
         'constraints' : 10,
         'past-values' : 0,
         'init_noise' : init_noise,
@@ -80,7 +80,7 @@ def run_sim(lengthscale, signal_variance):
     u_2 = 0.3 # control input to find equilibrium where we want to end and linearize around
 
     # TIME
-    t = 1000
+    t = 250
 
     control_time = Time_Def(
         0, 
@@ -96,11 +96,12 @@ def run_sim(lengthscale, signal_variance):
 
     # GP settings
     optim_steps = 0
-    pretrain_steps = 00
+    pretrain_steps = 300
 
+    # lengthscale = 5.5
     hyperparameters = {
-        'lengthscale_2': torch.log(torch.exp(torch.tensor(lengthscale))-1), # 5.77
-        'signal_variance_2': torch.log(torch.exp(torch.tensor(signal_variance))-1), #
+        # 'lengthscale_2': torch.log(torch.exp(torch.tensor(lengthscale))-1), # 5.77
+        # 'signal_variance_2': torch.log(torch.exp(torch.tensor(signal_variance))-1), #
     }
 
 
@@ -148,7 +149,7 @@ def run_sim(lengthscale, signal_variance):
         optimize_mpc_gp(model, train_x, training_iterations=pretrain_steps)
 
         # model, mask = pretrain(system_matrix, num_tasks, control_time, pretrain_steps, reference_strategie, states, hyperparameters)# pretrain the system and generate gp model. eventually not necessary
-        sim_data, ref_data, lode_data, settling_time = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
+        sim_data, ref_data, lode_data, _, _ = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
 
 
     # calc error
@@ -195,7 +196,8 @@ def run_sim(lengthscale, signal_variance):
     }
     fig = create_mpc_plot(None, None, ['x1','x2', 'u'], 'Time ($\mathrm{s})$', 'Water Level ($\mathrm{m}$)', reference_data, x_e=[states.target[0],states.target[1],states.target[2]])
     plt.show()
-    save_plot_to_pdf(fig, f'mpc_plot_l={lengthscale}_s={signal_variance}')
+
+    # save_plot_to_pdf(fig, f'mpc_plot_l={lengthscale}_s={signal_variance}')
 
     # plot_results(ref_data, lode_data, sim_data)
     # plt.show()
@@ -220,21 +222,21 @@ def run_sim(lengthscale, signal_variance):
         print(f"save data with data id {SIM_ID}")
 
 
-# run_sim(None)
+run_sim()
 
-lengthscales = [
-    # 8, 
-    5, 
-    # 3.5
-    ]
-s_variances = [
-    0.01, 
-    0.05, 
-    # 0.1
-    ]
+# lengthscales = [
+#     # 8, 
+#     5, 
+#     # 3.5
+#     ]
+# s_variances = [
+#     0.01, 
+#     0.05, 
+#     # 0.1
+#     ]
 
-for i in range(len(lengthscales)):
-    for j in range(len(s_variances)):
-        print(f"lengthscale: {lengthscales[i]}, signal_variance: {s_variances[j]}")
-        run_sim(lengthscales[i], s_variances[j])
-        print("\n----------------------------------------------------------------------------------\n")
+# for i in range(len(lengthscales)):
+#     for j in range(len(s_variances)):
+#         print(f"lengthscale: {lengthscales[i]}, signal_variance: {s_variances[j]}")
+#         run_sim(lengthscales[i], s_variances[j])
+#         print("\n----------------------------------------------------------------------------------\n")

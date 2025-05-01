@@ -18,7 +18,7 @@ torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
 
-local_predictions = True
+local_predictions = False
 SAVE = False
 output_weights=True
 system_name = "nonlinear_watertank"
@@ -188,7 +188,9 @@ for i, center in enumerate(model.true_centers):
     centers[1][i] = center[1]
 
 trajectory_plot = plot_trajectory(test_data, {'equilibrium points': equilibriums, 'model centers': centers})
+save_plot_to_pdf(trajectory_plot, f'trajectory_plot_m_talk')
 
+plt.show()
 
 
 

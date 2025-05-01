@@ -168,7 +168,7 @@ def predict_reference(model:LODEGP, step_time:Time_Def, states:State_Description
 
 def mpc_algorithm(system:ODE_System, model:LODEGP, states:State_Description, reference_strategy:dict, control_time:Time_Def, sim_time:Time_Def, optim_steps=10, plot_single_steps=False ):
     convergence  = False
-    EARLY_CONVERGENCE = False
+    EARLY_CONVERGENCE = True
     settling_time = None
     # init time
     step_count = int(ceil(control_time.step / sim_time.step))
@@ -302,7 +302,7 @@ def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_De
     noise = torch.tile(x_noise, (constraint_points+a,))
     
     setpoint[0,:] = states.init
-    #setpoint[0,2] = torch.nan
+    # setpoint[0,2] = torch.nan #TODO
 
     noise[0:x_noise.shape[0]] = init_noise
     
