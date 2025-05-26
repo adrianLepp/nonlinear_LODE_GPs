@@ -83,6 +83,7 @@ class LODEGP(gpytorch.models.ExactGP):
             A, 
             mean_module:gpytorch.means.Mean=None,
             additive_se=False,
+            verbose=False,
         ):
         self.contains_nan = train_y is not None and any(train_y.isnan().flatten())
         self.num_tasks = num_tasks
@@ -119,7 +120,7 @@ class LODEGP(gpytorch.models.ExactGP):
                 gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=0
             )) + gpytorch.kernels.ScaleKernel(LODE_Kernel(A, self.common_terms))
         else:
-            self.covar_module = LODE_Kernel(A, self.common_terms, verbose=False)
+            self.covar_module = LODE_Kernel(A, self.common_terms, verbose=verbose)
             #FIXME do we want rand
             for name, param in self.covar_module.named_parameters():
                 param.data = torch.rand_like(param) * 3 -1.5 

@@ -11,6 +11,7 @@ from gpytorch.distributions import MultivariateNormal
 from gpytorch.likelihoods import GaussianLikelihood
 from linear_operator.operators import DiagLinearOperator, ConstantDiagLinearOperator
 import math
+from torch.distributions import LogNormal
 
 from nonlinear_LODE_GPs.lodegp import optimize_gp
 from nonlinear_LODE_GPs.kernels import FeedbackControl_Kernel
@@ -499,9 +500,14 @@ class MultiOutputLikelihood(gpytorch.likelihoods._GaussianLikelihoodBase):
 
 class Linearizing_Control_5(gpytorch.models.ExactGP):
     def __init__(self, x:torch.Tensor, u:torch.Tensor, y_ref:torch.Tensor, b:float, a:torch.Tensor, v:torch.Tensor, variance, **kwargs):
-        train_x = torch.cat(x, dim=0)
-        train_u = torch.cat(u, dim=0)
-        train_y = torch.cat(y_ref, dim=0) # TODOL output is dim 3: create two masked channels before
+        if isinstance(x, List):
+            train_x = torch.cat(x, dim=0)
+            train_u = torch.cat(u, dim=0)
+            train_y = torch.cat(y_ref, dim=0) # TODOL output is dim 3: create two masked channels before
+        else:
+            train_x = x
+            train_u = u
+            train_y = y_ref
         train_y = torch.stack([torch.full_like(train_y, torch.nan), torch.full_like(train_y, torch.nan), train_y], dim=-1)
 
         likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(3, )# noise_constraint=gpytorch.constraints.GreaterThan(torch.tensor(1e-15))
@@ -527,7 +533,8 @@ class Linearizing_Control_5(gpytorch.models.ExactGP):
         return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)
 
     def optimize(self, optim_steps:int, verbose:bool):
-        return optimize_gp(self, optim_steps, verbose)
+        training_loss, parameters =  optimize_gp(self, optim_steps, verbose)
+        self.loss = training_loss[-1]
     
     def get_nonlinear_fcts(self):
         self.eval()
@@ -535,12 +542,14 @@ class Linearizing_Control_5(gpytorch.models.ExactGP):
         def alpha(x):
             if len(x.shape) == 1:
                 x = torch.tensor(x).unsqueeze(0)
-            return self(torch.tensor(x)).mean[:, 0].unsqueeze(-1)
+            with torch.no_grad():
+                return self(torch.tensor(x)).mean[:, 0].unsqueeze(-1)
 
         def beta(x, u):
             if len(x.shape) == 1:
                 x = torch.tensor(x).unsqueeze(0)
-            return self(torch.tensor(x)).mean[:, 1].unsqueeze(-1)
+            with torch.no_grad():
+                return self(torch.tensor(x)).mean[:, 1].unsqueeze(-1)
 
         return alpha, beta
     
@@ -564,25 +573,33 @@ class VariationalGP(gpytorch.models.ApproximateGP):
     
 class CompositeModel(torch.nn.Module):
     def __init__(self, train_x:torch.Tensor, train_u:torch.Tensor, train_y:torch.Tensor, **kwargs):
-        self.train_u = torch.cat(train_u, dim=0)
-        self.train_targets = torch.cat(train_y, dim=0)
-        self.train_inputs = [torch.cat(train_x, dim=0)]
+        input_dim = 2
+        if isinstance(train_x, List):
+            self.train_u = torch.cat(train_u, dim=0)
+            self.train_targets = torch.cat(train_y, dim=0)
+            self.train_inputs = [torch.cat(train_x, dim=0)]
+        else:
+            self.train_u = train_u
+            self.train_targets = train_y
+            self.train_inputs = [train_x]
 
         inducing_length = math.floor(train_x[0].shape[0] / 2)
         train_z = torch.cat([x[0:inducing_length] for x in train_x], dim=0)
         #FIXME: How to choose inducing points from state space?
         # Choose inducing points by sampling uniformly from the input space
         # Assuming the input space is bounded, define the bounds
-        x_min, x_max = train_x[0][:, 0].min(), train_x[0][:, 0].max()
-        y_min, y_max = train_x[0][:, 1].min(), train_x[0][:, 1].max()
+        x_min, x_max = train_x[:, 0].min(), train_x[:, 0].max()
+        y_min, y_max = train_x[:, 1].min(), train_x[:, 1].max()
 
         # Generate a grid of inducing points within the bounds
         l = 5
         inducing_points_x, inducing_points_y = torch.meshgrid(
             torch.linspace(x_min, x_max, l),
-            torch.linspace(y_min, y_max, l)
+            torch.linspace(y_min, y_max, l),
+            indexing='ij'
         )
         inducing_points = torch.stack([inducing_points_x.flatten(), inducing_points_y.flatten()], dim=-1)
+        self.inducing_points = inducing_points
 
         super().__init__()
 
@@ -620,19 +637,23 @@ class CompositeModel(torch.nn.Module):
                 print(f"Iter {i}, Loss: {loss.item():.4f}")
             optimizer.step()
 
+        self.loss = train_loss[-1].item()
+
     def get_nonlinear_fcts(self):
         self.eval()
         self.likelihood.eval()
         def alpha(x):
             if len(x.shape) == 1:
                 x = torch.tensor(x).unsqueeze(0)
-            return self._alpha(torch.tensor(x)).mean
+            with torch.no_grad():
+                return self._alpha(torch.tensor(x)).mean
 
         def beta(x, u):
             if len(x.shape) == 1:
                 x = torch.tensor(x).unsqueeze(0)
-            log_beta = self._log_beta(torch.tensor(x))
-            _beta = squared_gaussian(log_beta)
+            with torch.no_grad():
+                log_beta = self._log_beta(torch.tensor(x))
+                _beta = squared_gaussian(log_beta)
             return _beta.mean
             # return torch.exp(log_beta.mean)
         

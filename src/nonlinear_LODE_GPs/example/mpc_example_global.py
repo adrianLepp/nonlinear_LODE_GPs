@@ -1,17 +1,17 @@
-
-# from sage.all import *
-# import sage
-#https://ask.sagemath.org/question/41204/getting-my-own-module-to-work-in-sage/
-from nonlinear_LODE_GPs.kernels import *
+import gpytorch 
 import torch
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.metrics import mean_squared_error
+
+from result_reporter.latex_exporter import create_mpc_plot
 
 # ----------------------------------------------------------------------------
-from helpers import *
-from likelihoods import *
-from masking import *
-from mpc import mpc_algorithm, create_setpoints
-from sum_gp import CombinedPosterior_ELODEGP
-from weighting import Gaussian_Weight
+from nonlinear_LODE_GPs.helpers import get_config, Time_Def, load_system, simulate_system, downsample_data, save_everything, plot_results,  Data_Def, State_Description, get_ode_from_spline
+from nonlinear_LODE_GPs.weighting import Gaussian_Weight, KL_Divergence_Weight, Epanechnikov_Weight, Mahalanobis_Distance
+from nonlinear_LODE_GPs.combined_posterior import CombinedPosterior_ELODEGP
+from nonlinear_LODE_GPs.likelihoods import FixedTaskNoiseMultitaskLikelihood
+from nonlinear_LODE_GPs.mpc import mpc_algorithm, pretrain, optimize_mpc_gp, create_setpoints
 
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
@@ -32,7 +32,15 @@ equilibrium_controls = [
     0.2, 
     0.3, 
     0.4, 
-    # 0.5
+    0.5
+]
+
+weight_lengthscales = [
+    53,
+    68,
+    249,
+    503,
+    507
 ]
 
 start = 1
@@ -93,53 +101,45 @@ state_start = equilibriums[start]
 # state_end = equilibriums[end]
 state_end = torch.tensor([0.3, 0.3, torch.nan])#torch.nan 1e-5
 
-l=1
-w_func = Gaussian_Weight(centers[0])
-d = w_func.covar_dist(centers[1], w_func.center, square_dist=True)
-l = d*torch.sqrt(torch.tensor(2))/8
 
-# soft constraints for states
-#x_min = torch.tensor([system.x_min[0],system.x_min[1], x_e[2]])
 
 if reference_strategie['soft_constraints'] == 'state_limit':
     x_min = torch.tensor(system.x_min)
     x_max = torch.tensor(system.x_max)
 elif reference_strategie['soft_constraints'] == 'equilibrium':
-    #constraint_factor = 1.1
     x_min = x_e * 0.9
-    #x_min =torch.cat((x_e[0:system.state_dimension] * 0.9, x_e[system.state_dimension::] * 0.5),0)
     x_max = x_e * 1.1
-    #x_max =torch.cat((x_e[0:system.state_dimension] * 1.1, x_e[system.state_dimension::] * 2),0)
 
-#x_min[2] = x_e[2]
 states = State_Description(init=state_start, target=state_end, min=x_min, max=x_max)
 
 with gpytorch.settings.observation_nan_policy('mask'):
 
-
     train_y, train_x, task_noise = create_setpoints(reference_strategie, control_time, states)
     likelihood = FixedTaskNoiseMultitaskLikelihood(num_tasks=num_tasks, noise=torch.tensor([1e-8,1e-8]), rank=num_tasks, has_task_noise=True, task_noise=task_noise)
+
+    likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks, noise_constraint=gpytorch.constraints.Positive())
+    model = CombinedPosterior_ELODEGP(
+        train_x, 
+        train_y, 
+        likelihood, 
+        num_tasks, 
+        system_matrices, 
+        equilibriums, 
+        centers,
+        Mahalanobis_Distance, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
+        weight_lengthscale=weight_lengthscales,
+        shared_weightscale=False,
+        # additive_se=True,
+        clustering=False,
+        output_weights=True,
+        )#, 
     
-    # works
-    # noise=1e-8
-    # task_noise = torch.diag(torch.tensor(init_noise, requires_grad=False))
-    # covar_factor = torch.eye(num_tasks, requires_grad=False)
-    # likelihood.initialize(task_noise_covar=task_noise)
-    # likelihood.task_noise_covar_factor.requires_grad = False
 
-    #likelihood.initialize(task_noise_covar=torch.eye(num_tasks, requires_grad=False)*noise)
-    #likelihood.initialize(task_noise_covar_factor=covar_factor)
-    # likelihood.task_noise_covar.requires_grad = Falsev ar.detach()
-    # likelihood.task_noise_covar = likelihood.task_noise_covar.detach()
+    model._optimize(optim_steps)
+    model.optimize(0)
+    model.eval()
 
-
-    #model = Weighted_Sum_GP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
-    model = CombinedPosterior_ELODEGP(train_x, train_y, likelihood, num_tasks, system_matrices, equilibriums, centers, weight_lengthscale=l)
-    model.optimize(optim_steps)
-
-
-    sim_data, ref_data, lode_data = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
-
+    sim_data, ref_data, lode_data, _, _ = mpc_algorithm(system, model, states, reference_strategie,  control_time, sim_time, optim_steps)#, plot_single_steps=True
 
 # calc error
 def mse_mean(mean, ref, indx=None):
@@ -171,15 +171,27 @@ control_err = mse_mean(
     #torch.zeros_like(torch.tensor(lode_data))
 )
 
-control_mean =  mean(sim_data.y[:,2])#0:control_time.count+1
+control_mean =  np.mean(sim_data.y[:,2])#0:control_time.count+1
 
 print(f"mean Control: {control_mean}")
 print(f"Control error: {control_err}")
 print(f"Constraint violation: {constraint_viol}")
 
+reference_data = {
+    'time': sim_data.time,
+    'f1': sim_data.y[:,0],
+    'f2': sim_data.y[:,1],
+    'f3': sim_data.y[:,2],
+    }
+
+fig = create_mpc_plot(None, None, ['x1','x2', 'u'], 'Time ($\mathrm{s})$', 'Water Level ($\mathrm{m}$)', reference_data, x_e=[states.target[0],states.target[1],states.target[2]], close_constraint=False)
+plt.show()
+
 
 plot_results(ref_data, lode_data, sim_data)
 
+
+'''
 if SAVE:
     torch.save(model.state_dict(), model_path)
 
@@ -195,4 +207,4 @@ if SAVE:
 
     print(f"save model with model id {MODEL_ID}")
     print(f"save data with data id {SIM_ID}")
-
+'''

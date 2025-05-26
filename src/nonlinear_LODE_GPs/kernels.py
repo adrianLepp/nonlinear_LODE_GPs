@@ -365,7 +365,12 @@ class LODE_Kernel(Kernel):
     def __init__(self, A, common_terms, active_dims=None, verbose=False):
         super(LODE_Kernel, self).__init__(active_dims=active_dims)
 
-        self.model_parameters = torch.nn.ParameterDict()
+        # self.model_parameters = torch.nn.ParameterDict()
+        # FIXME:
+        self.model_parameters = torch.nn.ParameterDict({
+           "a":torch.nn.Parameter(torch.tensor(0.0)),
+           "b":torch.nn.Parameter(torch.tensor(0.0))
+        })
         #self.num_tasks = num_tasks
 
         D, U, V = A.smith_form()
@@ -467,7 +472,8 @@ def create_kernel_matrix_from_diagonal(D):
             # Create an SE kernel
             var(f"signal_variance_{i}")
             var(f"lengthscale_{i}")
-            translation_dictionary[f"LODEGP_kernel_{i}"] = globals()[f"signal_variance_{i}"]**2 * exp(-1/2*(t1-t2)**2/globals()[f"lengthscale_{i}"]**2)
+            #translation_dictionary[f"LODEGP_kernel_{i}"] = globals()[f"signal_variance_{i}"]**2 * exp(-1/2*(t1-t2)**2/globals()[f"lengthscale_{i}"]**2)
+            translation_dictionary[f"LODEGP_kernel_{i}"] = globals()[f"signal_variance_{i}"]**2 * exp(-(t1-t2)**2/globals()[f"lengthscale_{i}"]**2)
         elif entry == 1:
             translation_dictionary[f"LODEGP_kernel_{i}"] = 0 
         else:

@@ -265,7 +265,7 @@ class Epanechnikov_Weight(gpytorch.Module):
     
 
 class Mahalanobis_Distance(gpytorch.Module):
-    def __init__(self, center:torch.Tensor, scale_prior=None, scale_constraint=None, shared_weightscale=False):
+    def __init__(self, center:torch.Tensor, scale_prior=None, scale_constraint=None, shared_weightscale=False, scale=1200):
         super(Mahalanobis_Distance, self).__init__()
         self.center = center
         self.num_tasks = 3 #FIXME
@@ -275,7 +275,7 @@ class Mahalanobis_Distance(gpytorch.Module):
 
 
             self.register_parameter(
-                name='raw_scale', parameter=torch.nn.Parameter(torch.ones(1, 1)*1200)
+                name='raw_scale', parameter=torch.nn.Parameter(torch.ones(1, 1)*scale)
             )
             
             if scale_constraint is not None:

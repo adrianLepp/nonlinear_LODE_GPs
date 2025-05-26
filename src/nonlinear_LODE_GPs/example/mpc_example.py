@@ -18,7 +18,7 @@ from result_reporter.latex_exporter import save_plot_to_pdf, create_mpc_plot
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = True
+SAVE = False
 CONFIG_FILE = 'config.json'
 
 system_name = "nonlinear_watertank"
@@ -80,7 +80,7 @@ def run_sim(lengthscale=None, signal_variance=None):
     u_2 = 0.3 # control input to find equilibrium where we want to end and linearize around
 
     # TIME
-    t = 250
+    t = 200
 
     control_time = Time_Def(
         0, 
@@ -194,10 +194,10 @@ def run_sim(lengthscale=None, signal_variance=None):
         'f2': sim_data.y[:,1],
         'f3': sim_data.y[:,2],
     }
-    fig = create_mpc_plot(None, None, ['x1','x2', 'u'], 'Time ($\mathrm{s})$', 'Water Level ($\mathrm{m}$)', reference_data, x_e=[states.target[0],states.target[1],states.target[2]])
+    fig = create_mpc_plot(None, None, ['x1','x2', 'u'], 'Time ($\mathrm{s})$', 'Water Level ($\mathrm{m}$)', reference_data, x_e=[states.target[0],states.target[1],states.target[2]], close_constraint=False)
     plt.show()
 
-    # save_plot_to_pdf(fig, f'mpc_plot_l={lengthscale}_s={signal_variance}')
+    save_plot_to_pdf(fig, f'mpc_plot_endpoint_constraint')
 
     # plot_results(ref_data, lode_data, sim_data)
     # plt.show()

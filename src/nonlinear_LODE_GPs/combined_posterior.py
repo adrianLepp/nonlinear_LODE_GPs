@@ -45,9 +45,11 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             self.register_constraint("raw_scale", scale_constraint)
 
 
-            if weight_lengthscale is not None:
+            if weight_lengthscale is not None and not isinstance(weight_lengthscale, list):
                 self.scale = torch.tensor(weight_lengthscale)#, requires_grad=True
                 # self.raw_scale.requires_grad = False
+
+        
         else: 
             self.register_parameter( name='raw_scale', parameter=torch.nn.Parameter(None))
 
@@ -75,7 +77,7 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             mean_module = Equilibrium_Mean(equilibriums[i], num_tasks)
             model = LODEGP(train_x_subset, train_y_subset, likelihood, num_tasks, system_matrices[i], mean_module)
 
-            w_fcts.append(Weight_Model(centers[i], shared_weightscale=shared_weightscale))
+            w_fcts.append(Weight_Model(centers[i], shared_weightscale=shared_weightscale, scale=weight_lengthscale[i]))
             # if weight_lengthscale is not None:
             #     w_fcts[i].initialize(scale=torch.tensor(weight_lengthscale))#TODO
             
@@ -140,7 +142,7 @@ class CombinedPosterior_ELODEGP(gpytorch.models.ExactGP):
             weight_loss_max = weight_loss.max()
             weight_loss_mean = weight_loss.mean()
 
-            total_loss = weight_loss_max# + loss
+            total_loss = weight_loss_mean# + loss
             total_loss.backward()
 
             if verbose is True:

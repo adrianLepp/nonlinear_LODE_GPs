@@ -14,7 +14,7 @@ from scipy.integrate import solve_ivp
 torch.set_default_dtype(torch.float64)
 device = 'cpu'
 
-SAVE = False
+SAVE = True
 PLOT = False
 
 system_name = "inverted_pendulum"
@@ -129,12 +129,12 @@ def analyze_data(control_data):
 
 
 def control_metric_table(control_metric, table_name):
-    metric_names = ['steady_state_error','peak','peakTime', 'settling_time', 'energy', 'rmse_alpha', 'rmse_beta']
+    metric_names = ['steady_state_error','peak','peakTime', 'settling_time', 'energy', 'rmse_alpha', 'rmse_beta', 'loss']
     geometry_options = {"margin": "2.54cm", "includeheadfoot": True}
     doc = Document(page_numbers=True, geometry_options=geometry_options)
     
     with doc.create(Table()) as tab:
-        with doc.create(Tabular('c | c c c c c c c')) as table:
+        with doc.create(Tabular('c | c c c c c c c c')) as table:
             table.add_hline()
             table.add_row(['controller'] + metric_names)
             table.add_hline()
@@ -289,7 +289,8 @@ def evaluate_nonlinearities(gp_model, system, alpha, beta):
 
     test_points1, test_points2 = torch.meshgrid(
                 torch.linspace(x_min[0], x_max[0], l),
-                torch.linspace(x_min[1], x_max[1], l)
+                torch.linspace(x_min[1], x_max[1], l),
+                indexing='ij'
             )
     test_points = torch.stack([test_points1.flatten(), test_points2.flatten()], dim=-1)
 
@@ -318,7 +319,7 @@ def evaluate_nonlinearities(gp_model, system, alpha, beta):
 
 def main():
     t_train  = 5
-    t_test = 10
+    t_test = 15
 
     test_time = Time_Def(0, t_test, step=0.01)
 
@@ -346,6 +347,7 @@ def main():
                 'energy': [],
                 'rmse_alpha': [],
                 'rmse_beta': [],
+                'loss': [],
         }
 
         for seed in seed_variants:
@@ -372,6 +374,7 @@ def main():
             control_metrics['energy'].append(energy)
             control_metrics['rmse_alpha'].append(rmse_alpha)
             control_metrics['rmse_beta'].append(rmse_beta)
+            control_metrics['loss'].append(control_gp.loss)
 
             
 
@@ -388,16 +391,18 @@ def main():
                 trajectory_plot = plot_trajectory([control_data, exact_data, prior_data], {}, ax_labels=['angle (rad)', 'angular velocity (rad/s)'], labels = ['GP', "exact feedback", r'$u_0$'])
 
                 plt.show()
+
+                save_plot_to_pdf(figure, f'../data/figures/{Control_Class.__name__}_control_data_{seed}.pdf')
                 
         avg_metrics = {key: {'mean': np.mean(value), 'std': np.std(value)} for key, value in control_metrics.items()}
 
         control_metric[Control_Class.__name__] = avg_metrics
         print(f"Control Class: {Control_Class.__name__}")
 
-    control_metric_table(control_metric, '../data/tables/control_metrics')
+    control_metric_table(control_metric, '../data/tables/control_metrics_3')
 
             
 
     
-# main()
-test_standard_controller()
+main()
+# test_standard_controller()

@@ -5,12 +5,14 @@ from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.integrate import solve_ivp
+from time import sleep, perf_counter as pc
 
 # ----------------------------------------------------------------------------
 from nonlinear_LODE_GPs.lodegp import  optimize_gp, LODEGP
 from nonlinear_LODE_GPs.helpers import Time_Def, ODE_System, simulate_system, Data_Def, downsample_data, load_system
 from nonlinear_LODE_GPs.gp import GP, Linearizing_Control, Linearizing_Control_2, Linearizing_Control_4
 from nonlinear_LODE_GPs.likelihoods import FixedTaskNoiseMultitaskLikelihood
+from nonlinear_LODE_GPs.subsample import subsample_farthest_point
 
 
 class Controller():
@@ -21,6 +23,8 @@ class Controller():
         self.v = v
         self.alpha = alpha
         self.beta = beta
+
+        self.perf_time  = []
 
         if self.alpha is not None and self.beta is not None:
             self.type = 'feedback_linearization'
@@ -36,10 +40,20 @@ class Controller():
         return  self.v / beta * y_ref -  (self.alpha(x) + self.a @ x) / beta
 
     def __call__(self, x:np.ndarray, y_ref:np.ndarray):
+        t0= pc()
         if self.type == 'feedback_linearization':
-            return self.feedback_linearization(x, y_ref).squeeze()
+            u= self.feedback_linearization(x, y_ref).squeeze()
         else:
-            return self.direct_control(x, y_ref).squeeze()
+            u= self.direct_control(x, y_ref).squeeze()
+        t1= pc()
+        self.perf_time.append(t1-t0)
+
+        return u
+    
+    def get_performance(self):
+        perf_time = np.mean(self.perf_time)
+        perf_time_std = np.std(self.perf_time)
+        return perf_time, perf_time_std
 
 class Simulation_Config():
     def __init__(self, time:Time_Def, x_init, u, downsample:int, description:str):
@@ -141,14 +155,28 @@ def get_feedback_controller(
         _train_x_u[:,-1] = system_data[i].y[:,-1].clone()
         _train_y_ref = lodegp_data[i].y[:,-1].clone() 
 
-        train_y_ref, train_x_u  = downsample_data(_train_y_ref, _train_x_u, sim_config.downsample)
-        _, _var  = downsample_data(None, lodegp_data[i].uncertainty['variance'].clone(), sim_config.downsample)
-        x.append(train_x_u[:,:-1])
-        u.append(train_x_u[:,-1])
-        y_ref.append(train_y_ref)
-        var.append(_var[:,-1])
+        # a downsample 
+        # train_y_ref, train_x_u  = downsample_data(_train_y_ref, _train_x_u, sim_config.downsample)
+        # _, _var  = downsample_data(None, lodegp_data[i].uncertainty['variance'].clone(), sim_config.downsample)
+        # x.append(train_x_u[:,:-1])
+        # u.append(train_x_u[:,-1])
+        # y_ref.append(train_y_ref)
+        # var.append(_var[:,-1])
 
-    control_gp = ControlGP_Class(x, u, y_ref, variance=var, **controlGP_kwargs) #, b = 0.1, controller=controller
+
+        x.append(_train_x_u[:,:-1])
+        u.append(_train_x_u[:,-1])
+        y_ref.append(_train_y_ref)
+        var.append(lodegp_data[i].uncertainty['variance'].clone()[:,-1])
+
+        # b not
+
+    x_subsample, y_subsample, idx = subsample_farthest_point(torch.cat(x, dim=0), torch.cat(y_ref, dim=0) ,100)
+    u_supsample = torch.cat(u, dim=0)[idx]
+    var_subsample = torch.cat(var, dim=0)[idx]
+
+    control_gp = ControlGP_Class(x_subsample, u_supsample, y_subsample, variance=var_subsample, **controlGP_kwargs)
+    # control_gp = ControlGP_Class(x, u, y_ref, variance=var, **controlGP_kwargs) #, b = 0.1, controller=controller
 
     if model_config['load']:
         control_gp.load_state_dict(torch.load(model_config['model_path'], map_location=model_config['device']))

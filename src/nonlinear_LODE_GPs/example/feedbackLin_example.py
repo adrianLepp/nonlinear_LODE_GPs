@@ -30,7 +30,7 @@ model_path = f'{model_dir}/me_1{name}.pth' #umlauft_1 me_1
 model_config = {
     'device': device,
     'model_path': model_path,
-    'load': True,
+    'load': False,
     'save': False,
 }
 
@@ -76,11 +76,12 @@ control_gp_kwargs = {
     'noise': noise,
 }
 
+
 alpha, beta, control_gp = learn_system_nonlinearities(
     system, 
     sim_configs, 
     optim_steps, 
-    ControlGP_Class = CompositeModel, #Linearizing_Control_5,# CompositeModel
+    ControlGP_Class = Linearizing_Control_5, #Linearizing_Control_5,# CompositeModel
     controlGP_kwargs = control_gp_kwargs,
     plot=False, 
     model_config=model_config,
@@ -88,11 +89,13 @@ alpha, beta, control_gp = learn_system_nonlinearities(
 
 v = 0
 
+
+
 # -----------------------------------------------------------------
 # Plot surface of alpha and beta
 # -----------------------------------------------------------------
 
-
+'''
 
 l = 100
 val = 3* torch.pi / 4
@@ -101,15 +104,24 @@ x_max = [torch.pi, val ]
 
 test_points1, test_points2 = torch.meshgrid(
             torch.linspace(x_min[0], x_max[0], l),
-            torch.linspace(x_min[1], x_max[1], l)
+            torch.linspace(x_min[1], x_max[1], l),
+            indexing='ij'
         )
 test_points = torch.stack([test_points1.flatten(), test_points2.flatten()], dim=-1)
 
-beta_system = torch.zeros(control_gp.train_targets.shape[0])
-alpha_system = torch.zeros(control_gp.train_targets.shape[0])
-for i in range(control_gp.train_targets.shape[0]):
-    alpha_system[i] = system.alpha(control_gp.train_inputs[0][i].numpy())
-    beta_system[i] = system.beta(control_gp.train_inputs[0][i].numpy())
+
+if isinstance(control_gp, CompositeModel):
+    train_inputs = control_gp.inducing_points
+else:
+    train_inputs = control_gp.train_inputs[0]
+
+beta_system = torch.zeros(train_inputs.shape[0])
+alpha_system = torch.zeros(train_inputs.shape[0])
+
+
+for i in range(train_inputs.shape[0]):
+    alpha_system[i] = system.alpha(train_inputs[i].numpy())
+    beta_system[i] = system.beta(train_inputs[i].numpy())
 
 with gpytorch.settings.observation_nan_policy('mask'):
     with torch.no_grad():
@@ -120,8 +132,8 @@ fig_alpha = surface_plot(
     test_points1.numpy(),
     test_points2.numpy(),
     test_alpha.detach().numpy().reshape(l, l),
-    control_gp.train_inputs[0][:,0].numpy(),
-    control_gp.train_inputs[0][:,1].numpy(),
+    train_inputs[:,0].numpy(),
+    train_inputs[:,1].numpy(),
     alpha_system.numpy(),
     [r'$x_1$', r'$x_2$', r'$\alpha$'],
     [r'$\hat{\alpha}(\boldmath{x})$', r'${\alpha(\boldmath{x})}$']
@@ -131,13 +143,20 @@ fig_beta = surface_plot(
     test_points1.numpy(),
     test_points2.numpy(),
     test_beta.detach().numpy().reshape(l, l),
-    control_gp.train_inputs[0][:,0].numpy(),
-    control_gp.train_inputs[0][:,1].numpy(),
+    train_inputs[:,0].numpy(),
+    train_inputs[:,1].numpy(),
     beta_system.numpy(),
     [r'$x_1$', r'$x_2$', r'$\beta$'],
     [r'$\hat{\beta}(\boldmath{x})$', r'${\beta(\boldmath{x})}$']
 )
 
+plt.show()
+
+'''
+
+
+# save_plot_to_pdf(fig_alpha, f'alpha_feedbackLin_b')
+# save_plot_to_pdf(fig_beta, f'beta_feedbackLin_b')  
 
 
 # -----------------------------------------------------------------
@@ -152,9 +171,10 @@ test_controller = [
 
  
 
-sim_time_u = Time_Def(0, t*2, step=0.01)
+sim_time_u = Time_Def(0, 15, step=0.01)
 rng = np.random.default_rng()
-position = (np.pi - 2* rng.random() * np.pi)
+# position = (np.pi - 2* rng.random() * np.pi)
+position = (np.pi/2)
 
 x_0 = np.array([position , 0 ,0])
 
@@ -193,12 +213,19 @@ with gpytorch.settings.observation_nan_policy('mask'):
 #     title = f'Inverted Pendulum GP Control: a0: {a0}, a1: {a1}, v: {v}'
 #     )
 
+calc_time_mean1, calc_time_std1 = test_controller[1].get_performance()
+
+calc_time_mean2, calc_time_std2 = test_controller[2].get_performance()
+
+print(f'exact: {calc_time_mean1} +/- {calc_time_std1}')
+print(f'linear: {calc_time_mean2} +/- {calc_time_std2}')
 
 figure = plot_single_states(
     control_data,
     ['GP', "exact feedback", r'$u_0$'],
     header= [r'$x_1$', r'$x_2$', r'$u$'], 
     yLabel=['angle (rad)', 'angular velocity (rad/s) ', 'force (N) '],
+    line_styles=['-', '--', '-.'],
 )
 
 
@@ -217,11 +244,11 @@ plt.show()
 
 
 if SAVE:
-    save_plot_to_pdf(fig_alpha, f'alpha_feedbackLin_{SIM_ID}')
-    save_plot_to_pdf(fig_beta, f'beta_feedbackLin_{SIM_ID}')    
-    save_plot_to_pdf(fig_results, f'results_plot_feedbackLin_{SIM_ID}')
-    save_plot_to_pdf(trajectory_plot, f'trajectory_plot_feedbackLin_{SIM_ID}')
-    save_plot_to_pdf(figure, f'states_plot_feedbackLin_{SIM_ID}')
+    # save_plot_to_pdf(fig_alpha, f'alpha_feedbackLin_{SIM_ID}')
+    # save_plot_to_pdf(fig_beta, f'beta_feedbackLin_{SIM_ID}')    
+    # save_plot_to_pdf(fig_results, f'results_plot_feedbackLin_{SIM_ID}')
+    # save_plot_to_pdf(trajectory_plot, f'trajectory_plot_feedbackLin_{SIM_ID}')
+    # save_plot_to_pdf(figure, f'states_plot_feedbackLin_{SIM_ID}')
     config['model_id'] = MODEL_ID
     config['simulation_id'] = SIM_ID
     save_everything(

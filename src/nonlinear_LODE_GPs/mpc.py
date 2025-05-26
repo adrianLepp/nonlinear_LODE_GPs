@@ -308,7 +308,7 @@ def create_setpoints(reference_strategy:dict, time_obj:Time_Def, states:State_De
     
 
     if reference_strategy['target'] is True:
-        t_setpoint[-1] = 100 # time_obj.end 
+        t_setpoint[-1] = 105 # time_obj.end FIXME
         setpoint[-1,:] = states.target
         # setpoint[-1,2] = torch.nan
         #noise[-x_noise.shape[0]::] = target_noise

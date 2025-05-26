@@ -19,8 +19,8 @@ device = 'cpu'
 
 
 local_predictions = False
-SAVE = False
-output_weights=True
+SAVE = True
+output_weights=False
 system_name = "nonlinear_watertank"
 
 SIM_ID, MODEL_ID, model_path, config = get_config(system_name, save=SAVE)
@@ -96,7 +96,7 @@ model = CombinedPosterior_ELODEGP(
     system_matrices, 
     equilibriums, 
     centers,
-    Mahalanobis_Distance, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
+    Gaussian_Weight, #KL_Divergence_Weight, #Gaussian_Weight,  Epanechnikov_Weight, Mahalanobis_Distance
     # weight_lengthscale=torch.tensor([10]),
     shared_weightscale=False,
     # additive_se=True,
@@ -140,7 +140,7 @@ state_figure = plot_single_states(
 )
 
 
-weight_plot = plot_weights(test_x, weights)
+weight_plot = plot_weights(test_x, weights, 'time (s)')
 
 
 states = State_Description(
@@ -190,7 +190,7 @@ for i, center in enumerate(model.true_centers):
 trajectory_plot = plot_trajectory(test_data, {'equilibrium points': equilibriums, 'model centers': centers})
 save_plot_to_pdf(trajectory_plot, f'trajectory_plot_m_talk')
 
-plt.show()
+# plt.show()
 
 
 
@@ -222,8 +222,8 @@ plt.show()
 if SAVE:
     config['model_id'] = MODEL_ID
     config['simulation_id'] = SIM_ID
-    save_plot_to_pdf(fig_error, f'error_plot_{SIM_ID}')
-    save_plot_to_pdf(fig_results, f'results_plot_{SIM_ID}')
+    # save_plot_to_pdf(fig_error, f'error_plot_{SIM_ID}')
+    # save_plot_to_pdf(fig_results, f'results_plot_{SIM_ID}')
     save_plot_to_pdf(trajectory_plot, f'trajectory_plot_{SIM_ID}')
     save_plot_to_pdf(weight_plot, f'weight_plot_{SIM_ID}')
     save_everything(
